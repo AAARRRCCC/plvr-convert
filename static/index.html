@@ -92,9 +92,10 @@ code{font-family:var(--font-mono);font-size:.85em;background:var(--paper-2);padd
 .hint button{border:0;background:none;color:var(--wave);cursor:pointer;font:inherit;padding:0;text-decoration:underline dotted}
 
 .menu{display:flex;flex-wrap:wrap;justify-content:center;gap:14px}
-.menu button{display:flex;flex-direction:column;align-items:center;gap:8px;width:112px;padding:14px 8px 12px;border:2px solid var(--line);border-radius:16px;background:var(--win);box-shadow:0 5px 0 var(--shadow);cursor:pointer;font-family:var(--font-mono);font-weight:600;font-size:13px;transition:transform .16s ease-out,box-shadow .16s,background-color .16s}
-.menu button:hover{transform:translateY(-4px) scale(1.03);box-shadow:0 9px 2px var(--shadow-hover);background:var(--wave-2)}
-.menu button:active{transform:translateY(2px) scale(.96);box-shadow:0 2px 0 var(--shadow)}
+.menu a{color:inherit;text-decoration:none}
+.menu button,.menu a{display:flex;flex-direction:column;align-items:center;gap:8px;width:112px;padding:14px 8px 12px;border:2px solid var(--line);border-radius:16px;background:var(--win);box-shadow:0 5px 0 var(--shadow);cursor:pointer;font-family:var(--font-mono);font-weight:600;font-size:13px;transition:transform .16s ease-out,box-shadow .16s,background-color .16s}
+.menu button:hover,.menu a:hover{transform:translateY(-4px) scale(1.03);box-shadow:0 9px 2px var(--shadow-hover);background:var(--wave-2)}
+.menu button:active,.menu a:active{transform:translateY(2px) scale(.96);box-shadow:0 2px 0 var(--shadow)}
 .menu button.on{background:var(--wave-2);border-color:var(--wave)}
 .menu svg{width:36px;height:36px;stroke:var(--ink);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 
@@ -181,7 +182,7 @@ body.dropping .drop{display:grid}
   .win.home{min-height:0}
   .home .body{padding:26px 16px 24px;gap:22px}
   .paste{flex-wrap:wrap}.paste .go{width:100%;padding:12px}
-  .menu{gap:10px}.menu button{width:calc(50% - 5px);max-width:150px}
+  .menu{gap:10px}.menu button,.menu a{width:calc(50% - 5px);max-width:150px}
   .win.pop{position:fixed;inset:68px 12px 74px;width:auto;max-height:none;z-index:30}
   .win.pop .body{max-height:none;flex:1}
   .pop .bar{cursor:default}
@@ -218,7 +219,7 @@ body.dropping .drop{display:grid}
     <div class="body">
       <div class="hero">
         <h1>paste a <b>link</b>.</h1>
-        <p>any video from most of the internet, back as a file. it streams through the cluster and nothing is kept.</p>
+        <p>fully local hosted by me! nothing is ever kept!<br>fully sponsored and paid for by ArcCORP</p>
       </div>
       <form class="paste" id="form" autocomplete="off">
         <div class="field">
@@ -248,10 +249,10 @@ body.dropping .drop{display:grid}
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <span>recent</span>
         </button>
-        <button data-open="about">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-          <span>about</span>
-        </button>
+        <a class="bm" id="bm" href="#" title="drag me to the bookmarks bar">
+          <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          <span>convert this</span>
+        </a>
       </nav>
     </div>
   </section>
@@ -318,21 +319,6 @@ body.dropping .drop{display:grid}
     </div>
   </section>
 
-  <!-- about -->
-  <section class="win pop" id="w-about" aria-labelledby="t-about" hidden>
-    <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-about">about</span><button class="close" aria-label="close">×</button></div>
-    <div class="body">
-      <h2>about</h2>
-      <p>convert.plvr.net is a self-hosted video downloader and remuxer. it runs on the plvr.net cluster. paste a link, choose a format, and the file downloads. it supports the sites that <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a> supports, including youtube. it is free and has no account.</p>
-      <div class="eyebrow">how it works</div>
-      <p>yt-dlp reads the page and lists the available streams. if the site serves one complete file, it is passed through unchanged. if video and audio are separate streams, ffmpeg merges them while streaming, without re-encoding. audio conversion and gif output are the only cases where re-encoding happens.</p>
-      <div class="eyebrow">data</div>
-      <p>files are never written to disk. they stream through memory and are discarded. links are not logged; the log records only the site name and whether the request succeeded. settings and the recent list are stored in this browser only.</p>
-      <div class="eyebrow">usage</div>
-      <p>paste a link anywhere on the page to start. drop a link onto the window. open <code>/?url=…</code> to pass a link directly. bookmarklet: <a id="bm" href="#">convert this</a> (drag it to the bookmarks bar).</p>
-      <p class="note">yt-dlp <span class="v-ytdlp">…</span> · ffmpeg <span class="v-ffmpeg">…</span> · build <span class="v-app">…</span></p>
-    </div>
-  </section>
 </main>
 
 <iframe id="sink" hidden title="download"></iframe>
@@ -424,7 +410,7 @@ body.dropping .drop{display:grid}
     bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
   });
   $$('.menu button').forEach(b => b.addEventListener('click', () => { blip('click'); const w = $('#w-'+b.dataset.open); w.hidden ? open(b.dataset.open) : close(w); }));
-  $$('.menu button, .rb, .close, .chip, .sm, .go').forEach(el => el.addEventListener('pointerenter', () => blip('hover')));
+  $$('.menu button, .menu a, .rb, .close, .chip, .sm, .go').forEach(el => el.addEventListener('pointerenter', () => blip('hover')));
   addEventListener('keydown', e => { if(e.key === 'Escape'){ const w = pops.find(x => !x.hidden && x.classList.contains('focus')) || pops.find(x => !x.hidden); if(w) close(w); } });
   addEventListener('resize', () => pops.forEach(keepOnScreen));
 
@@ -652,12 +638,9 @@ body.dropping .drop{display:grid}
   }
   $('#site-q').addEventListener('input', e => paintSites(e.target.value));
 
-  /* ---- about: versions, the bookmarklet ---- */
+  /* ---- the bookmarklet: drag the button to the bookmarks bar, click it to be told so ---- */
   $('#bm').href = `javascript:location.href='${location.origin}/?url='+encodeURIComponent(location.href)`;
-  $('#bm').onclick = e => { e.preventDefault(); say('drag this to the bookmarks bar', true); };
-  $('#w-about').addEventListener('plvr:open', async () => {
-    try{ const j = await (await fetch('/healthz')).json(); $('.v-ytdlp').textContent = j.ytdlp; $('.v-ffmpeg').textContent = j.ffmpeg || '?'; $('.v-app').textContent = j.version; }catch(e){}
-  }, {once:true});
+  $('#bm').onclick = e => { e.preventDefault(); blip('click'); say('drag this to the bookmarks bar', true); };
 
   /* ---- arrive with a link ---- */
   const q = new URLSearchParams(location.search).get('url') || (location.hash.startsWith('#http') ? location.hash.slice(1) : '');
