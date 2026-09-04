@@ -583,7 +583,7 @@ body.dropping .drop{display:grid}
     const p = prep || (current && current.prep); if(!p) return;
     blip('done');
     sink.src = p.url;
-    say('downloading. your browser takes it from here', true);
+    say('sent to browser');
     remember(meta || current.media, p);
   }
 
