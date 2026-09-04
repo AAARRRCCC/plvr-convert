@@ -654,7 +654,7 @@ body.dropping .drop{display:grid}
 
   /* ---- about: versions, the bookmarklet ---- */
   $('#bm').href = `javascript:location.href='${location.origin}/?url='+encodeURIComponent(location.href)`;
-  $('#bm').onclick = e => { e.preventDefault(); say('drag it to the bookmarks bar, don\'t click it', true); };
+  $('#bm').onclick = e => { e.preventDefault(); say('drag this to the bookmarks bar', true); };
   $('#w-about').addEventListener('plvr:open', async () => {
     try{ const j = await (await fetch('/healthz')).json(); $('.v-ytdlp').textContent = j.ytdlp; $('.v-ffmpeg').textContent = j.ffmpeg || '?'; $('.v-app').textContent = j.version; }catch(e){}
   }, {once:true});
