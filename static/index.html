@@ -322,14 +322,14 @@ body.dropping .drop{display:grid}
   <section class="win pop" id="w-about" aria-labelledby="t-about" hidden>
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-about">about</span><button class="close" aria-label="close">×</button></div>
     <div class="body">
-      <h2>a downloader that lives in a closet</h2>
-      <p>this is a self-hosted cousin of <a href="https://cobalt.tools" target="_blank" rel="noopener">cobalt</a>, running on the same k3s cluster as <a href="https://plvr.net">plvr.net</a>. paste a link, pick what you want, and the file comes back.</p>
-      <div class="eyebrow">how</div>
-      <p><b>yt-dlp</b> reads the page and finds the streams. when the site hands out one plain file, it passes straight through. when video and audio are separate (youtube, always), <b>ffmpeg</b> muxes them together on the fly, streaming to you as it goes: no re-encoding, no waiting for a whole file to land first. audio conversions and gifs are the only time anything gets re-encoded.</p>
-      <div class="eyebrow">what's kept</div>
-      <p>nothing. files never touch a disk; they stream through memory and are gone. links aren't logged, only which site and whether it worked. your settings and recent list live in your browser.</p>
-      <div class="eyebrow">tricks</div>
-      <p>paste anywhere on the page and it goes. drop a link on the window. open <code>/?url=…</code> to skip the pasting. drag this to your bookmarks bar: <a id="bm" href="#">convert this</a>.</p>
+      <h2>about</h2>
+      <p>convert.plvr.net is a self-hosted video downloader and remuxer. it runs on the plvr.net cluster. paste a link, choose a format, and the file downloads. it supports the sites that <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a> supports, including youtube. it is free and has no account.</p>
+      <div class="eyebrow">how it works</div>
+      <p>yt-dlp reads the page and lists the available streams. if the site serves one complete file, it is passed through unchanged. if video and audio are separate streams, ffmpeg merges them while streaming, without re-encoding. audio conversion and gif output are the only cases where re-encoding happens.</p>
+      <div class="eyebrow">data</div>
+      <p>files are never written to disk. they stream through memory and are discarded. links are not logged; the log records only the site name and whether the request succeeded. settings and the recent list are stored in this browser only.</p>
+      <div class="eyebrow">usage</div>
+      <p>paste a link anywhere on the page to start. drop a link onto the window. open <code>/?url=…</code> to pass a link directly. bookmarklet: <a id="bm" href="#">convert this</a> (drag it to the bookmarks bar).</p>
       <p class="note">yt-dlp <span class="v-ytdlp">…</span> · ffmpeg <span class="v-ffmpeg">…</span> · build <span class="v-app">…</span></p>
     </div>
   </section>
