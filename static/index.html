@@ -423,8 +423,11 @@ body.dropping .drop{display:grid}
   paintSnd();
   const isDark = () => root.dataset.theme === 'dark';
   const paintThm = () => { thm.classList.toggle('off', isDark()); thm.title = isDark() ? 'light mode' : 'dark mode'; };
-  try{ const t = localStorage.getItem('plvr.theme'); if(t) root.dataset.theme = t; else if(matchMedia('(prefers-color-scheme:dark)').matches) root.dataset.theme = 'dark'; }catch(e){}
-  thm.onclick = () => { root.dataset.theme = isDark() ? 'light' : 'dark'; try{ localStorage.setItem('plvr.theme', root.dataset.theme); }catch(e){} paintThm(); blip('toggle'); say(isDark() ? 'dark mode' : 'light mode'); };
+  /* the theme lives in a cookie on .plvr.net so every plvr site opens in the mode you left the last one in;
+     localStorage backs it up for hosts the cookie can't reach, like localhost */
+  const themeCookie = { get: () => { const m = document.cookie.match(/(?:^|; )plvr_theme=(dark|light)/); return m ? m[1] : null; }, set: v => { document.cookie = 'plvr_theme=' + v + '; Domain=.plvr.net; Path=/; Max-Age=31536000; SameSite=Lax; Secure'; } };
+  try{ const t = themeCookie.get() || localStorage.getItem('plvr.theme'); if(t) root.dataset.theme = t; else if(matchMedia('(prefers-color-scheme:dark)').matches) root.dataset.theme = 'dark'; }catch(e){}
+  thm.onclick = () => { root.dataset.theme = isDark() ? 'light' : 'dark'; try{ themeCookie.set(root.dataset.theme); localStorage.setItem('plvr.theme', root.dataset.theme); }catch(e){} paintThm(); blip('toggle'); say(isDark() ? 'dark mode' : 'light mode'); };
   paintThm();
 })();
 
