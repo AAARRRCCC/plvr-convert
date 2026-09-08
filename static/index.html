@@ -268,7 +268,6 @@ body.dropping .drop{display:grid}
   <section class="win pop wide" id="w-settings" aria-labelledby="t-settings" hidden>
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-settings">settings</span><button class="close" aria-label="close">×</button></div>
     <div class="body">
-      <p>saved in this browser. every download uses these unless you change them on the result window.</p>
       <div class="eyebrow">video</div>
       <div class="set">
         <div class="opt"><label for="s-quality">quality cap</label><select id="s-quality" data-k="quality"><option value="max">best available</option><option value="2160">2160p (4k)</option><option value="1440">1440p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option><option value="240">240p</option><option value="144">144p</option></select></div>
@@ -287,11 +286,12 @@ body.dropping .drop{display:grid}
       </div>
       <div class="eyebrow">files</div>
       <div class="set">
-        <div class="opt"><label for="s-name">filename style</label><select id="s-name" data-k="name"><option value="pretty">pretty: title (1080p, h264)</option><option value="basic">basic: title</option><option value="classic">classic: youtube_id_1080p_h264</option><option value="nerdy">nerdy: title (1080p, h264, youtube, id)</option></select></div>
+        <div class="opt"><label for="s-name">filename style</label><select id="s-name" data-k="name"><option value="random">random</option><option value="custom">custom</option><option value="pretty">pretty: title (1080p, h264)</option><option value="basic">basic: title</option><option value="classic">classic: youtube_id_1080p_h264</option><option value="nerdy">nerdy: title (1080p, h264, youtube, id)</option></select></div>
+        <div class="opt" id="custom-name-row" hidden><label for="s-custom-name">file name</label><input id="s-custom-name" type="text" maxlength="150" placeholder="random if blank"></div>
       </div>
       <label class="tog"><span>write tags<small>title, uploader, date and the link, into the file</small></span><input type="checkbox" data-k="metadata"></label>
       <label class="tog"><span>embed cover art<small>the thumbnail, into mp3 and m4a</small></span><input type="checkbox" data-k="cover"></label>
-      <div class="set-foot"><span class="note" style="margin:0">nothing here leaves the browser except with each download.</span><button class="sm" id="reset">reset</button></div>
+      <div class="set-foot"><button class="sm" id="reset">reset</button></div>
     </div>
   </section>
 
@@ -436,7 +436,7 @@ body.dropping .drop{display:grid}
   const $ = (s, r=document) => r.querySelector(s), $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const { blip, say, open, close, mobile } = window.plvr;
   const store = { get: k => { try{ return localStorage.getItem('cv.' + k); }catch(e){ return null; } }, set: (k, v) => { try{ localStorage.setItem('cv.' + k, v); }catch(e){} }, del: k => { try{ localStorage.removeItem('cv.' + k); }catch(e){} } };
-  const DEFAULTS = {mode:'auto', quality:'1080', vcodec:'h264', container:'auto', aformat:'best', abitrate:'192', name:'pretty', metadata:true, cover:true, gif_width:480, gif_fps:12};
+  const DEFAULTS = {mode:'auto', quality:'1080', vcodec:'h264', container:'auto', aformat:'best', abitrate:'192', name:'random', custom_name:'', metadata:true, cover:true, gif_width:480, gif_fps:12};
   const settings = {};
   for(const k in DEFAULTS){ const v = store.get(k); settings[k] = v == null ? DEFAULTS[k] : (typeof DEFAULTS[k] === 'boolean' ? v === '1' : (typeof DEFAULTS[k] === 'number' ? +v : v)); }
   const save = (k, v) => { settings[k] = v; store.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v)); paintHint(); };
@@ -460,9 +460,14 @@ body.dropping .drop{display:grid}
   setMode(settings.mode); paintHint();
 
   /* ---- settings window ---- */
+  const customName = $('#s-custom-name');
+  const paintName = () => { $('#custom-name-row').hidden = settings.name !== 'custom'; customName.value = settings.custom_name; };
+  paintName();
+  customName.addEventListener('change', () => { save('custom_name', customName.value); if(current) rePrepare(); });
+  $('#s-name').addEventListener('change', () => { $('#custom-name-row').hidden = $('#s-name').value !== 'custom'; });
   $$('#w-settings select').forEach(el => { el.value = String(settings[el.dataset.k]); el.addEventListener('change', () => { blip('click'); save(el.dataset.k, isNaN(+el.value) || el.dataset.k === 'quality' ? el.value : +el.value); if(current) rePrepare(); }); });
   $$('#w-settings input[type=checkbox]').forEach(el => { el.checked = !!settings[el.dataset.k]; el.addEventListener('change', () => { blip('toggle'); save(el.dataset.k, el.checked); if(current) rePrepare(); }); });
-  $('#reset').onclick = () => { for(const k in DEFAULTS){ store.del(k); settings[k] = DEFAULTS[k]; } $$('#w-settings select').forEach(el => el.value = String(settings[el.dataset.k])); $$('#w-settings input[type=checkbox]').forEach(el => el.checked = !!settings[el.dataset.k]); setMode('auto'); blip('close'); say('back to defaults'); };
+  $('#reset').onclick = () => { for(const k in DEFAULTS){ store.del(k); settings[k] = DEFAULTS[k]; } $$('#w-settings select').forEach(el => el.value = String(settings[el.dataset.k])); $$('#w-settings input[type=checkbox]').forEach(el => el.checked = !!settings[el.dataset.k]); paintName(); setMode('auto'); if(current) rePrepare(); blip('close'); say('back to defaults'); };
 
   /* ---- the input ---- */
   url.addEventListener('input', () => { clear.hidden = !url.value; });

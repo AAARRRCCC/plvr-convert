@@ -5,6 +5,7 @@ never re-encode video, mux on the fly, transcode audio only when asked.
 from __future__ import annotations
 
 import re
+import secrets
 import shlex
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,11 +20,11 @@ VCODECS = ("h264", "vp9", "av1")
 CONTAINERS = ("auto", "mp4", "webm", "mkv")
 AFORMATS = ("best", "mp3", "m4a", "opus", "ogg", "wav")
 ABITRATES = ("320", "256", "192", "128", "96", "64")
-NAMES = ("pretty", "basic", "classic", "nerdy")
+NAMES = ("random", "custom", "pretty", "basic", "classic", "nerdy")
 
 DEFAULTS = {
     "mode": "auto", "quality": "1080", "vcodec": "h264", "container": "auto",
-    "aformat": "best", "abitrate": "192", "name": "pretty",
+    "aformat": "best", "abitrate": "192", "name": "random", "custom_name": "", "random_name": "",
     "metadata": True, "cover": True, "direct": False,
     "start": None, "end": None, "gif_fps": 12, "gif_width": 480,
 }
@@ -45,6 +46,9 @@ def normalize(raw: dict | None) -> dict:
     choose("aformat", AFORMATS)
     choose("abitrate", ABITRATES)
     choose("name", NAMES)
+    o["custom_name"] = str(raw.get("custom_name") or "")[:150]
+    random_name = str(raw.get("random_name") or "")
+    o["random_name"] = random_name if re.fullmatch(r"[a-f0-9]{24}", random_name) else secrets.token_hex(12)
     for k in ("metadata", "cover", "direct"):
         o[k] = bool(raw.get(k, o[k]))
     for k in ("start", "end"):
@@ -357,7 +361,13 @@ def filename(info: dict, o: dict, ext: str, qual: str | None, codec: str | None,
     site = clean((info.get("extractor_key") or info.get("extractor") or "site").lower(), 30)
     vid = clean(str(info.get("id") or ""), 40)
     bits = [b for b in (qual, codec, tag) if b]
-    if style == "classic":
+    if style == "random" or (style == "custom" and not o.get("custom_name", "").strip()):
+        name = o.get("random_name") or secrets.token_hex(12)
+    elif style == "custom":
+        name = clean(o["custom_name"], 150)
+        if name.lower().endswith("." + ext.lower()):
+            name = name[:-(len(ext) + 1)]
+    elif style == "classic":
         name = "_".join(x for x in (site, vid or None, *bits) if x)
     elif style == "basic":
         name = title
