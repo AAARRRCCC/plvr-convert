@@ -1,9 +1,9 @@
-"""convert.plvr.net: paste a link, get a file.
+"""convert.plvr.net: a self-hosted video downloader and remuxer.
 
-POST /api/resolve   {url}                       -> what's there
+POST /api/resolve   {url}                       -> the media at that link
 POST /api/prepare   {url, item?, options}       -> a signed download link
 GET  /api/download/<name>?t=<token>             -> the file, streamed
-GET  /api/sites                                 -> what yt-dlp knows
+GET  /api/sites                                 -> the sites yt-dlp supports
 GET  /healthz
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ app = FastAPI(title="convert.plvr.net", docs_url=None, redoc_url=None, openapi_u
 
 class Gate:
     """Per-client and global caps: a resolve budget per minute, and a cap on
-    streams open at once, so one person cannot occupy the whole pod."""
+    streams open at once, so one client cannot use all of the pod's capacity."""
 
     def __init__(self):
         self.recent: dict[str, deque] = defaultdict(deque)

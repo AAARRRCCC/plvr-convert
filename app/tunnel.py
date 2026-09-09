@@ -1,11 +1,11 @@
-"""Fetching upstream files the way the sites want them fetched.
+"""Fetch upstream files with the request shape each site expects.
 
-Two jobs live here. `fetch` reads one upstream file, honouring a Range and
+This module does two things. `fetch` reads one upstream file, honouring a Range and
 splitting the read into ranged chunks when the site throttles unranged
 requests (YouTube: ~20 KB/s without a Range header, full speed with one).
 `serve` is a loopback HTTP server, bound to 127.0.0.1 only, that exposes
 registered inputs to ffmpeg so ffmpeg's own reads and seeks become those
-same well-behaved requests instead of one long throttled GET.
+same ranged requests instead of one long throttled GET.
 """
 from __future__ import annotations
 

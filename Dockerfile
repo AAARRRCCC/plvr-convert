@@ -1,6 +1,6 @@
 # One image: python + yt-dlp for reading sites, ffmpeg for muxing, deno so
 # yt-dlp can run YouTube's JavaScript challenges. Runs as an unprivileged user
-# on a read-only root; everything writable lives under /tmp.
+# on a read-only root; all writable paths are under /tmp.
 FROM python:3.13-slim-trixie
 
 ARG DENO_VERSION=v2.9.6

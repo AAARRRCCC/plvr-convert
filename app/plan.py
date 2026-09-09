@@ -1,6 +1,7 @@
-"""Turn "this media, these preferences" into "hand this URL through" or "run
-ffmpeg like so". The choices here are the ones cobalt makes: copy streams,
-never re-encode video, mux on the fly, transcode audio only when asked.
+"""Decide, for one media item and a set of preferences, whether to pass the
+URL through unmodified or run ffmpeg, and with which arguments. The choices
+here are the ones cobalt makes: copy streams, never re-encode video, mux while
+downloading, transcode audio only when asked.
 """
 from __future__ import annotations
 
@@ -117,20 +118,20 @@ def _best_video(fs: list[Fmt], o: dict) -> Fmt | None:
     for codec in _ordered_codecs(o["vcodec"]):
         at = [f for f in under if (f.height or 0) == top and f.vcodec == codec]
         if at:
-            # sdr over hdr, a plain file over a playlist, then the fattest stream
+            # sdr over hdr, a plain file over a playlist, then the highest bitrate
             return max(at, key=lambda f: (not f.hdr, f.direct, f.kind == "video", f.tbr, f.fps))
     return max(under, key=lambda f: (f.height or 0, not f.hdr, f.direct, f.tbr))
 
 
 def _best_audio(fs: list[Fmt], want: str | None) -> Fmt | None:
-    """Best audio-only stream; the original language wins over dubs, then the
-    codec that suits the container, then bitrate."""
+    """Best audio-only stream; the original language is preferred over dubs, then
+    the codec the container supports, then bitrate."""
     auds = [f for f in fs if f.kind == "audio"]
     if not auds:
         return None
-    # a known codec first (an HLS variant that reports none is a worse bet), then
+    # a known codec first (an HLS variant that reports none is less likely to work), then
     # the original track (yt-dlp marks dubs with a lower preference), then the
-    # codec the container likes, a plain file over a playlist, then bitrate
+    # codec the container supports, a plain file over a playlist, then bitrate
     return max(auds, key=lambda f: (f.acodec != "other", f.lang_pref > 0, f.acodec == want if want else 0, f.direct, f.abr or f.tbr))
 
 
@@ -151,7 +152,7 @@ def _container(o: dict, v: Fmt, a: Fmt | None) -> str:
 
 def _in_args(f: Fmt, start: float | None, url: str) -> list[str]:
     """One -i and what goes before it. `url` is what ffmpeg should open: the
-    loopback tunnel for a plain file, the real thing for an HLS playlist."""
+    loopback tunnel for a plain file, the upstream URL itself for an HLS playlist."""
     args: list[str] = []
     if f.protocol == "m3u8":
         args += ["-protocol_whitelist", "file,http,https,tcp,tls,crypto,hls"]
@@ -206,7 +207,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
         want = "opus" if _container(o, v, None) == "webm" else "aac"
         a = _best_audio(fs, want)
         if a is None:
-            # no separate audio anywhere: borrow it from a progressive stream
+            # no separate audio anywhere: take it from a progressive stream
             prog = [f for f in fs if f.kind == "progressive"]
             if prog:
                 a = max(prog, key=lambda f: (f.direct, f.abr or f.tbr))
@@ -214,7 +215,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
     qual = f"{v.height}p" if v.height else "video"
     size = v.size + (a.size if a and a is not v else 0)
 
-    # the cheap path: one plain file that is already what was asked for
+    # the pass-through case: one plain file that is already what was asked for
     if v.kind == "progressive" and v.direct and not clip and (o["container"] == "auto" or o["container"] == v.ext or (o["container"] == "mp4" and v.ext in ("mp4", "m4v"))):
         ext = v.ext if v.ext in MIME else "mp4"
         return Plan("proxy", ext, filename(info, o, ext, qual, v.vcodec), f"{qual} · {v.vcodec} · direct", size, src=v)
@@ -222,7 +223,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
     inputs = [v] + ([a] if a is not None else [])
     maps = ["-map", "0:v:0", "-map", ("1:a:0" if a is not None else "0:a:0?")]
     acodec = ["-c:a", "copy"]
-    # "other" is an HLS variant that did not say; copy it and let the mkv fallback catch a refusal
+    # "other" is an HLS variant that reported no codec; copy it, and fall back to mkv if the muxer refuses
     if a is not None and ext == "mp4" and a.acodec not in ("aac", "mp3", "ac3", "eac3", "opus", "other"):
         acodec = ["-c:a", "aac", "-b:a", "192k"]
     if a is not None and ext == "webm" and a.acodec not in ("opus", "vorbis"):
@@ -269,8 +270,8 @@ def _audio(info, fs, o, meta, dur, clip) -> Plan:
     br = o["abitrate"] + "k"
     label = f"{fmt} · {'copied' if copy else 'converted'}"
 
-    # the cheap path: an audio file already in the asked-for container, when no
-    # tags are wanted (tags mean ffmpeg has to touch it)
+    # the pass-through case: an audio file already in the asked-for container, when no
+    # tags are wanted (tags mean ffmpeg has to rewrite it)
     if copy and src_is_audio and a.direct and not clip and not o["metadata"] and a.ext == fmt:
         return Plan("proxy", fmt, filename(info, o, fmt, None, None, "audio"), label + " · direct", a.size, src=a)
 
@@ -285,7 +286,7 @@ def _audio(info, fs, o, meta, dur, clip) -> Plan:
     thumb = info.get("thumbnail")
     plan = Plan("ffmpeg", ext, filename(info, o, ext, None, None, "audio"), label, a.size if copy else 0, inputs=[a], args=args)
     if fmt == "mp3" and o["metadata"]:
-        # ffmpeg can't tag an mp3 it can't seek in (a pipe), so the tag is ours:
+        # ffmpeg can't tag an mp3 it can't seek in (a pipe), so this code builds the tag:
         # it is built in the stream layer and sent ahead of untagged audio
         plan.tags = _meta_dict(info)
         plan.cover = thumb if o["cover"] else None
@@ -294,7 +295,7 @@ def _audio(info, fs, o, meta, dur, clip) -> Plan:
         cover = thumb
         plan.cover = cover
         plan.args = ["-map", "0:a:0", "-map", "1:v:0", "-c:v", "mjpeg", "-vf", "scale='min(600,iw)':-2", "-disposition:v:0", "attached_pic"] + codec_args + dur + meta + _out(ext)
-        # the thumbnail may fail to fetch or decode; the audio matters more
+        # the thumbnail may fail to fetch or decode; the audio is then sent without it
         plan.fallbacks.append(Plan("ffmpeg", ext, plan.filename, label, plan.size, inputs=[a],
                                    args=["-map", "0:a:0", "-vn"] + codec_args + dur + meta + _out(ext)))
     else:

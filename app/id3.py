@@ -14,7 +14,7 @@ def _frame(fid: str, payload: bytes) -> bytes:
 
 
 def _text(fid: str, value: str) -> bytes:
-    # encoding 1: UTF-16 with BOM, the one every player has understood since 2000
+    # encoding 1: UTF-16 with BOM, supported by every player since 2000
     return _frame(fid, b"\x01" + value.encode("utf-16"))
 
 

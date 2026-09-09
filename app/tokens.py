@@ -1,5 +1,5 @@
 """Signed, short-lived download links. The stream endpoint only ever acts on a
-token this process (or its siblings sharing the secret) minted, so it cannot
+token this process (or another process sharing the secret) issued, so it cannot
 be pointed at an arbitrary URL.
 """
 from __future__ import annotations

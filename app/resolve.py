@@ -1,7 +1,7 @@
-"""yt-dlp in, a plain description of the media out.
+"""Run yt-dlp on a link and return a plain description of the media.
 
 Everything the site knows about a link comes from one extract_info call; the
-result is cached briefly so the download step does not pay for a second one.
+result is cached briefly so the download step does not need a second one.
 """
 from __future__ import annotations
 
@@ -46,8 +46,8 @@ class _Logger:
 
 def assert_public(url: str) -> None:
     """Refuse anything that points inside the network. yt-dlp's generic extractor
-    will fetch whatever it is given, so this is the SSRF gate at the app layer;
-    the NetworkPolicy is the one that actually holds."""
+    will fetch whatever it is given, so this is the SSRF check at the app layer;
+    the cluster NetworkPolicy is the enforced boundary."""
     p = urlparse(url)
     if p.scheme not in ("http", "https") or not p.hostname:
         raise ResolveError("that doesn't look like a link")
@@ -132,7 +132,7 @@ class Fmt:
 
     @property
     def direct(self) -> bool:
-        """A plain file over HTTP, which can be handed through untouched."""
+        """A plain file over HTTP, which can be passed through unmodified."""
         return self.protocol in ("http", "https")
 
 

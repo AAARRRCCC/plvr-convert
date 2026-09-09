@@ -1,5 +1,5 @@
-"""The two ways bytes reach the browser: straight through from the site, or out
-of an ffmpeg pipe. Nothing touches the disk.
+"""The two ways bytes reach the browser: passed through from the site, or read
+from an ffmpeg pipe. Nothing is written to disk.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ async def proxy(plan: Plan, range_header: str | None) -> Started:
 
 async def cover_jpeg(url: str) -> bytes | None:
     """The thumbnail as a jpeg no wider than 600px, via a short ffmpeg run;
-    None if it can't be had, and the audio goes out without it."""
+    None if it cannot be fetched or decoded; the audio is then sent without it."""
     try:
         assert_public(url)
         proc = await asyncio.create_subprocess_exec(
@@ -63,7 +63,7 @@ def _urlfor(f: Fmt) -> str:
 
 
 async def ffmpeg(plan: Plan, start: float | None) -> Started:
-    """Run the plan; if ffmpeg dies before its first byte, try the plan's fallbacks."""
+    """Run the plan; if ffmpeg exits before producing its first byte, try the plan's fallbacks."""
     tried: list[str] = []
     prefix = b""
     if plan.ext == "mp3" and plan.tags:

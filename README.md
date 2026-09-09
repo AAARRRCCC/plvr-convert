@@ -1,13 +1,13 @@
 # convert.plvr.net
 
-Paste a link, get a file. A self-hosted video downloader and remuxer in the
-spirit of cobalt: yt-dlp reads the site, ffmpeg muxes the streams on the fly,
-nothing is written to disk and nothing is kept.
+A self-hosted video downloader and remuxer modelled on cobalt: yt-dlp reads
+the site, ffmpeg muxes the streams as they download, nothing is written to
+disk and nothing is kept.
 
 - **any major site**: whatever yt-dlp supports (YouTube included, with deno for
   the JavaScript challenges).
 - **video**: pick a quality cap and a codec; separate video and audio streams are
-  merged as they download, a single progressive file is passed straight through.
+  merged as they download, a single progressive file is passed through unmodified.
 - **audio**: best as-is (m4a/opus/mp3), or converted to mp3/m4a/opus/ogg/wav
   with tags and cover art.
 - **mute**, **gif**, and **clip** (start/end) modes.
@@ -29,6 +29,6 @@ Env: `TOKEN_SECRET` (download links are signed; random per process if unset),
 ## How it ships
 
 Pushing to `main` builds `ghcr.io/aaarrrccc/plvr-convert:<12-char sha>`. The
-cluster repo (`cluster-sec`, `k8s/convert/`) pins that tag; bumping it there is
-the deploy. yt-dlp is pinned in `requirements.txt`; when a site breaks, bump
-it, push, then bump the tag.
+cluster repo (`cluster-sec`, `k8s/convert/`) pins that tag; bumping it there
+deploys the new image. yt-dlp is pinned in `requirements.txt`; when a site stops
+working, bump it, push, then bump the tag.
