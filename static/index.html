@@ -602,8 +602,7 @@ body.dropping .drop{display:grid}
     result.innerHTML = `
       <p><b>${esc(j.title || 'a few things at that link')}</b>${j.uploader ? `<br><small style="color:var(--ink-2)">${esc(j.uploader)}</small>` : ''}</p>
       <div class="grid">${j.picker.map(m => `<button class="pick" data-i="${m.index}" title="${esc(m.title)}">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : `<div class="ph">${m.has_video ? 'video' : 'audio'}</div>`}<small><span>#${m.index + 1}</span><span>${fmtDur(m.duration) || (m.has_video ? 'video' : 'audio')}</span></small></button>`).join('')}</div>
-      <div class="dl"><button class="sm" id="all">download all, one after another</button></div>
-      <div class="plan" id="plan">tap one to download it with your current settings.</div>`;
+      <div class="dl"><button class="sm" id="all">download all, one after another</button></div>`;
     const one = async (btn) => {
       const i = +btn.dataset.i; btn.classList.add('busy');
       try{
