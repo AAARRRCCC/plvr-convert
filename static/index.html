@@ -300,14 +300,12 @@ body.dropping .drop{display:grid}
   <section class="win pop" id="w-sites" aria-labelledby="t-sites" hidden>
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-sites">sites</span><button class="close" aria-label="close">×</button></div>
     <div class="body">
-      <p>the usual suspects, and <span id="site-count">a lot</span> more.</p>
       <div class="tags">
         <span class="tag">youtube</span><span class="tag">tiktok</span><span class="tag">instagram</span><span class="tag">twitter / x</span><span class="tag">reddit</span><span class="tag">twitch clips</span><span class="tag">vimeo</span><span class="tag">soundcloud</span><span class="tag">bluesky</span><span class="tag">facebook</span><span class="tag">bilibili</span><span class="tag">streamable</span><span class="tag">tumblr</span><span class="tag">pinterest</span><span class="tag">dailymotion</span><span class="tag">vk</span><span class="tag">loom</span><span class="tag">bandcamp</span><span class="tag">direct .mp4 / .m3u8</span>
       </div>
       <div class="eyebrow">everything</div>
       <input class="search" id="site-q" placeholder="search the whole list…" aria-label="search sites">
       <div class="all" id="site-all"><span>loading…</span></div>
-      <p class="note">the list is yt-dlp's (<span id="ytdlp-v">…</span>). if a site is here but a link fails, the site probably changed and yt-dlp needs a bump.</p>
     </div>
   </section>
 
@@ -315,7 +313,6 @@ body.dropping .drop{display:grid}
   <section class="win pop" id="w-recent" aria-labelledby="t-recent" hidden>
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-recent">recent</span><button class="close" aria-label="close">×</button></div>
     <div class="body">
-      <p>the last few, kept in this browser only.</p>
       <ul class="dir" id="recent"></ul>
       <div class="set-foot"><span></span><button class="sm" id="forget">forget all</button></div>
     </div>
@@ -637,7 +634,7 @@ body.dropping .drop{display:grid}
     if(sites) return;
     try{
       const r = await fetch('/api/sites'); const j = await r.json(); sites = j.names;
-      $('#site-count').textContent = j.count.toLocaleString(); $('#ytdlp-v').textContent = j.ytdlp; paintSites('');
+      paintSites('');
     }catch(e){ $('#site-all').innerHTML = '<span>couldn\'t load the list</span>'; }
   });
   function paintSites(q){
