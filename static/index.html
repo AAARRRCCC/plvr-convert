@@ -107,6 +107,9 @@ code{font-family:var(--font-mono);font-size:.85em;background:var(--paper-2);padd
 .card b{display:block;font-size:16px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .card small{display:block;color:var(--ink-2);font-size:13px;margin-top:4px}
 .card .host{font-family:var(--font-mono);font-size:12px;color:var(--wave)}
+.card>div{min-width:0}
+.result-name{width:100%;min-width:0;box-sizing:border-box;font:700 16px/1.3 var(--font-body);color:var(--ink);background:transparent;border:1px solid transparent;border-radius:4px;padding:2px 0;text-overflow:ellipsis}
+.result-name:hover,.result-name:focus{border-color:var(--wave);outline:none}
 .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0 6px}
 .opt{display:flex;flex-direction:column;gap:4px}
 .opt[hidden]{display:none}
@@ -158,7 +161,8 @@ details.clip .opts{margin:8px 0 0}
 
 /* ---------- recent ---------- */
 .dir{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.entry{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:8px 12px;border:2px solid var(--line);border-radius:12px;background:var(--win);box-shadow:0 3px 0 var(--tag-shadow)}
+.entry{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px 12px;border:2px solid var(--line);border-radius:12px;background:var(--win);box-shadow:0 3px 0 var(--tag-shadow)}
+.entry>div{min-width:0;overflow:hidden}
 .entry b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .entry small{display:block;color:var(--ink-2);font-size:12px;font-family:var(--font-mono)}
 
@@ -507,7 +511,9 @@ body.dropping .drop{display:grid}
     blip('click');
     try{
       const j = await api('/api/resolve', {url: u});
+      ++prepSeq;
       current = {url: u, key: j.key, local: {}};
+      if(j.media) current.local.random_name = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2,'0')).join('');
       if(j.media){ current.media = j.media; showMedia(j.media); }
       else { current.picker = j.picker; showPicker(j); }
       open('result');
@@ -534,7 +540,7 @@ body.dropping .drop{display:grid}
     result.innerHTML = `
       <div class="card">
         ${m.thumbnail ? `<img class="thumb${m.extractor === 'soundcloud' || isAudioOnly ? ' sq' : ''}" src="${esc(m.thumbnail)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : `<div class="thumb"></div>`}
-        <div><b>${esc(m.title)}</b><small>${esc(m.uploader || '')}${m.uploader && m.duration ? ' · ' : ''}${fmtDur(m.duration) || ''}</small><span class="host">${esc(siteName(m.extractor))}${isAudioOnly ? ' · audio only' : ''}</span></div>
+        <div><input class="result-name" id="result-name" aria-label="download filename" title="edit download filename" maxlength="154" disabled><small>${esc(m.uploader || '')}${m.uploader && m.duration ? ' · ' : ''}${fmtDur(m.duration) || ''}</small><span class="host">${esc(siteName(m.extractor))}${isAudioOnly ? ' · audio only' : ''}</span></div>
       </div>
       <div class="opts">
         ${mode === 'auto' || mode === 'mute' ? `<div class="opt"><label for="r-quality">quality</label><select id="r-quality" data-k="quality">${qopts}</select></div>
@@ -556,7 +562,17 @@ body.dropping .drop{display:grid}
       <div class="plan" id="plan">working out the best way…</div>`;
     if(isAudioOnly && settings.mode !== 'audio') current.local.mode = 'audio';
     $$('#result select').forEach(el => { const k = el.dataset.k; el.value = String(current.local[k] ?? settings[k]); if(el.value !== String(current.local[k] ?? settings[k])) el.selectedIndex = 0; el.addEventListener('change', () => { blip('click'); current.local[k] = k === 'quality' ? el.value : (isNaN(+el.value) ? el.value : +el.value); rePrepare(); }); });
-    $$('#result input').forEach(el => el.addEventListener('change', () => { current.local[el.dataset.k] = parseTime(el.value); rePrepare(); }));
+    $$('#result input[data-k]').forEach(el => el.addEventListener('change', () => { current.local[el.dataset.k] = parseTime(el.value); rePrepare(); }));
+    const name = $('#result-name'), owner = current;
+    let nameTimer;
+    name.addEventListener('input', () => {
+      ++prepSeq; current.prep = null; $('#dl').disabled = true; $('#copy').disabled = true;
+      current.local.name = 'custom';
+      const suffix = '.' + owner.filenameExt;
+      current.local.custom_name = name.value.toLowerCase().endsWith(suffix.toLowerCase()) ? name.value.slice(0, -suffix.length) : name.value;
+      clearTimeout(nameTimer); nameTimer = setTimeout(() => { if(current === owner) rePrepare(); }, 250);
+    });
+    name.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); name.blur(); } });
     $('#dl').onclick = () => download();
     $('#copy').onclick = async () => { if(!current || !current.prep) return; try{ await navigator.clipboard.writeText(location.origin + current.prep.url); blip('done'); say('copied. it works for half an hour'); }catch(e){ say('couldn\'t copy'); } };
   }
@@ -576,6 +592,8 @@ body.dropping .drop{display:grid}
       const p = await api('/api/prepare', {url: current.url, item: current.item ?? null, options: options()});
       if(seq !== prepSeq) return;
       current.prep = p;
+      current.filenameExt = p.ext;
+      const name = $('#result-name'); name.value = p.filename; name.disabled = false;
       const size = fmtSize(p.size);
       plan.textContent = `${p.label}${size ? ' · ~' + size : ''} · ${p.method === 'proxy' ? 'straight from the site' : 'through ffmpeg'} · ${p.filename}`;
       dl.disabled = false; cp.disabled = false;
