@@ -18,7 +18,6 @@ from .stream import CHUNK, FFMPEG, FIRST_BYTE_TIMEOUT, Started, _kill, _rest, _u
 
 log = logging.getLogger("convert.shot")
 
-THEMES = tuple(card.THEMES)
 MAX_DURATION = 600   # x.com's own cap is ten minutes for most accounts
 
 
@@ -54,7 +53,7 @@ def describe(post: dict) -> dict:
 
 
 def make(post: dict, o: dict) -> Shot:
-    L = card.layout(post, o["shot_theme"], o["shot_stats"])
+    L = card.layout(post, "dark", o["shot_stats"])
     info = {"title": tweet.plain_text(post)[:80] or post["handle"], "id": post["id"], "extractor_key": "twitter"}
     size = f"{L.width}×{L.height}"
     if L.cells:

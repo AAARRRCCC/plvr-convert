@@ -239,8 +239,8 @@ body.dropping .drop{display:grid}
         <button class="chip on" data-mode="auto" role="radio" aria-checked="true"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>auto</button>
         <button class="chip" data-mode="audio" role="radio" aria-checked="false"><svg viewBox="0 0 24 24"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>audio</button>
         <button class="chip" data-mode="mute" role="radio" aria-checked="false"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>mute</button>
-        <button class="chip" data-mode="gif" role="radio" aria-checked="false"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15v-6M11 15v-6h3M16 12h2M17 9v6"/></svg>gif</button>
-        <button class="chip" data-mode="shot" role="radio" aria-checked="false" title="an x.com post, drawn as it looks on the page; a video if it has one"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="M6 12h12M6 15.5h8"/></svg>screenshot</button>
+        <button class="chip" data-mode="gif" role="radio" aria-checked="false"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M2 8h20M2 16h20M7 3v18M17 3v18"/></svg>gif</button>
+        <button class="chip" data-mode="shot" role="radio" aria-checked="false"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="M6 12h12M6 15.5h8"/></svg>screenshot</button>
       </div>
       <div class="hint" id="hint"></div>
       <nav class="menu" aria-label="pages">
@@ -276,13 +276,13 @@ body.dropping .drop{display:grid}
     <div class="body">
       <div class="eyebrow">video</div>
       <div class="set">
-        <div class="opt"><label for="s-quality">quality cap</label><select id="s-quality" data-k="quality"><option value="max">best available</option><option value="2160">2160p (4k)</option><option value="1440">1440p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option><option value="240">240p</option><option value="144">144p</option></select></div>
+        <div class="opt"><label for="s-quality">quality cap</label><select id="s-quality" data-k="quality"><option value="max">best available</option><option value="2160">2160p</option><option value="1440">1440p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option><option value="240">240p</option><option value="144">144p</option></select></div>
         <div class="opt"><label for="s-vcodec">codec</label><select id="s-vcodec" data-k="vcodec"><option value="h264">h264 (plays everywhere)</option><option value="vp9">vp9 (smaller)</option><option value="av1">av1 (smallest, newest)</option></select></div>
-        <div class="opt"><label for="s-container">container</label><select id="s-container" data-k="container"><option value="auto">auto (whatever fits the codec)</option><option value="mp4">mp4</option><option value="webm">webm</option><option value="mkv">mkv</option></select></div>
+        <div class="opt"><label for="s-container">container</label><select id="s-container" data-k="container"><option value="auto">auto</option><option value="mp4">mp4</option><option value="webm">webm</option><option value="mkv">mkv</option></select></div>
       </div>
       <div class="eyebrow">audio</div>
       <div class="set">
-        <div class="opt"><label for="s-aformat">format</label><select id="s-aformat" data-k="aformat"><option value="best">best (as the site has it)</option><option value="mp3">mp3</option><option value="m4a">m4a (aac)</option><option value="opus">opus</option><option value="ogg">ogg (vorbis)</option><option value="wav">wav</option></select></div>
+        <div class="opt"><label for="s-aformat">format</label><select id="s-aformat" data-k="aformat"><option value="best">best available</option><option value="mp3">mp3</option><option value="m4a">m4a (aac)</option><option value="opus">opus</option><option value="ogg">ogg (vorbis)</option><option value="wav">wav</option></select></div>
         <div class="opt"><label for="s-abitrate">bitrate, when converting</label><select id="s-abitrate" data-k="abitrate"><option value="320">320 kbps</option><option value="256">256 kbps</option><option value="192">192 kbps</option><option value="128">128 kbps</option><option value="96">96 kbps</option><option value="64">64 kbps</option></select></div>
       </div>
       <div class="eyebrow">gif</div>
@@ -292,10 +292,9 @@ body.dropping .drop{display:grid}
       </div>
       <div class="eyebrow">screenshot</div>
       <div class="set">
-        <div class="opt"><label for="s-shot_theme">theme</label><select id="s-shot_theme" data-k="shot_theme"><option value="dark">lights out</option><option value="dim">dim</option><option value="light">light</option></select></div>
-        <div class="opt"><label for="s-shot_depth">quotes</label><select id="s-shot_depth" data-k="shot_depth"><option value="0">just the post</option><option value="1">the post and what it quotes</option><option value="2">two quotes deep</option><option value="3">three quotes deep</option></select></div>
+        <div class="opt"><label for="s-shot_depth">quote depth</label><select id="s-shot_depth" data-k="shot_depth"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
       </div>
-      <label class="tog"><span>show the counts<small>replies, reposts, likes and views under the post</small></span><input type="checkbox" data-k="shot_stats"></label>
+      <label class="tog"><span>show post metrics</span><input type="checkbox" data-k="shot_stats"></label>
       <div class="eyebrow">files</div>
       <div class="set">
         <div class="opt"><label for="s-name">filename style</label><select id="s-name" data-k="name"><option value="random">random</option><option value="custom">custom</option><option value="pretty">pretty: title (1080p, h264)</option><option value="basic">basic: title</option><option value="classic">classic: youtube_id_1080p_h264</option><option value="nerdy">nerdy: title (1080p, h264, youtube, id)</option></select></div>
@@ -312,7 +311,7 @@ body.dropping .drop{display:grid}
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-sites">sites</span><button class="close" aria-label="close">×</button></div>
     <div class="body">
       <div class="tags">
-        <span class="tag">youtube</span><span class="tag">tiktok</span><span class="tag">instagram</span><span class="tag">twitter / x (and screenshots of posts)</span><span class="tag">reddit</span><span class="tag">twitch clips</span><span class="tag">vimeo</span><span class="tag">soundcloud</span><span class="tag">bluesky</span><span class="tag">facebook</span><span class="tag">bilibili</span><span class="tag">streamable</span><span class="tag">tumblr</span><span class="tag">pinterest</span><span class="tag">dailymotion</span><span class="tag">vk</span><span class="tag">loom</span><span class="tag">bandcamp</span><span class="tag">direct .mp4 / .m3u8</span>
+        <span class="tag">youtube</span><span class="tag">tiktok</span><span class="tag">instagram</span><span class="tag">twitter / x</span><span class="tag">reddit</span><span class="tag">twitch clips</span><span class="tag">vimeo</span><span class="tag">soundcloud</span><span class="tag">bluesky</span><span class="tag">facebook</span><span class="tag">bilibili</span><span class="tag">streamable</span><span class="tag">tumblr</span><span class="tag">pinterest</span><span class="tag">dailymotion</span><span class="tag">vk</span><span class="tag">loom</span><span class="tag">bandcamp</span><span class="tag">direct .mp4 / .m3u8</span>
       </div>
       <div class="eyebrow">everything</div>
       <input class="search" id="site-q" placeholder="search the whole list…" aria-label="search sites">
@@ -445,7 +444,7 @@ body.dropping .drop{display:grid}
   const $ = (s, r=document) => r.querySelector(s), $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const { blip, say, open, close, mobile } = window.plvr;
   const store = { get: k => { try{ return localStorage.getItem('cv.' + k); }catch(e){ return null; } }, set: (k, v) => { try{ localStorage.setItem('cv.' + k, v); }catch(e){} }, del: k => { try{ localStorage.removeItem('cv.' + k); }catch(e){} } };
-  const DEFAULTS = {mode:'auto', quality:'1080', vcodec:'h264', container:'auto', aformat:'best', abitrate:'192', name:'random', custom_name:'', metadata:true, cover:true, gif_width:480, gif_fps:12, shot_theme:'dark', shot_depth:1, shot_stats:true};
+  const DEFAULTS = {mode:'auto', quality:'1080', vcodec:'h264', container:'auto', aformat:'best', abitrate:'192', name:'random', custom_name:'', metadata:true, cover:true, gif_width:480, gif_fps:12, shot_depth:1, shot_stats:true};
   const settings = {};
   for(const k in DEFAULTS){ const v = store.get(k); settings[k] = v == null ? DEFAULTS[k] : (typeof DEFAULTS[k] === 'boolean' ? v === '1' : (typeof DEFAULTS[k] === 'number' ? +v : v)); }
   const save = (k, v) => { settings[k] = v; store.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v)); paintHint(); };
@@ -462,8 +461,7 @@ body.dropping .drop{display:grid}
   chips.forEach(c => c.addEventListener('click', () => { blip('click'); const was = settings.mode; setMode(c.dataset.mode); if(current){ if((was === 'shot') !== (settings.mode === 'shot')) submit(); else rePrepare(); } }));
   function paintHint(){
     const m = settings.mode, q = settings.quality === 'max' ? 'best' : settings.quality + 'p';
-    const themes = {dark:'lights out', dim:'dim', light:'light'}, depths = ['no quotes', 'with its quote', 'two quotes deep', 'three quotes deep'];
-    const s = m === 'audio' ? `${settings.aformat}${settings.aformat === 'best' ? '' : ' · ' + settings.abitrate + 'k'}` : m === 'gif' ? `${settings.gif_width}px · ${settings.gif_fps}fps` : m === 'shot' ? `x.com posts · ${themes[settings.shot_theme] || settings.shot_theme} · ${depths[settings.shot_depth] || depths[1]}` : `${q} · ${settings.vcodec} · ${settings.container}`;
+    const s = m === 'audio' ? `${settings.aformat}${settings.aformat === 'best' ? '' : ' · ' + settings.abitrate + 'k'}` : m === 'gif' ? `${settings.gif_width}px · ${settings.gif_fps}fps` : m === 'shot' ? `screenshot · quote depth ${settings.shot_depth}` : `${q} · ${settings.vcodec} · ${settings.container}`;
     hint.innerHTML = `${esc(s)} · ${esc(settings.name)} names · <button type="button" id="hint-set">change</button>`;
     $('#hint-set').onclick = () => { blip('click'); open('settings'); };
   }
@@ -578,23 +576,20 @@ body.dropping .drop{display:grid}
   }
 
   function showPost(m){
-    $('#t-result').textContent = 'found the post';
-    const what = m.has_video ? 'a video of the post' : 'a picture of the post';
+    $('#t-result').textContent = 'found it';
     result.innerHTML = `
       <div class="card">
         ${m.thumbnail ? `<img class="thumb sq" src="${esc(m.thumbnail)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : `<div class="thumb sq"></div>`}
-        <div><input class="result-name" id="result-name" aria-label="download filename" title="edit download filename" maxlength="154" disabled><small>${esc(m.uploader || '')}${m.duration ? ' · ' + fmtDur(m.duration) : ''}</small><span class="host">x · ${what}${m.quoted ? ', with the quote' : ''}</span></div>
+        <div><input class="result-name" id="result-name" aria-label="download filename" title="edit download filename" maxlength="154" disabled><small>${esc(m.uploader || '')}${m.duration ? ' · ' + fmtDur(m.duration) : ''}</small><span class="host">x · screenshot · ${m.has_video ? 'mp4' : 'png'}</span></div>
       </div>
-      <p class="note" style="margin:10px 0 0">${esc(m.title || '')}</p>
       <div class="opts">
-        <div class="opt"><label for="r-shot_theme">theme</label><select id="r-shot_theme" data-k="shot_theme"><option value="dark">lights out</option><option value="dim">dim</option><option value="light">light</option></select></div>
-        <div class="opt"><label for="r-shot_depth">quotes</label><select id="r-shot_depth" data-k="shot_depth"><option value="0">just the post</option><option value="1">with its quote</option><option value="2">two deep</option><option value="3">three deep</option></select></div>
+        <div class="opt"><label for="r-shot_depth">quote depth</label><select id="r-shot_depth" data-k="shot_depth"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
       </div>
       <div class="dl">
         <button class="big" id="dl" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12M6 11l6 6 6-6"/><path d="M4 21h16"/></svg><span>download</span></button>
         <button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button>
       </div>
-      <div class="plan" id="plan">laying it out…</div>`;
+      <div class="plan" id="plan">working out the best way…</div>`;
     $$('#result select').forEach(el => { const k = el.dataset.k; el.value = String(current.local[k] ?? settings[k]); el.addEventListener('change', () => { blip('click'); current.local[k] = isNaN(+el.value) ? el.value : +el.value; rePrepare(); }); });
     wireName();
     $('#dl').onclick = () => download();
@@ -632,7 +627,7 @@ body.dropping .drop{display:grid}
       current.filenameExt = p.ext;
       const name = $('#result-name'); name.value = p.filename; name.disabled = false;
       const size = fmtSize(p.size);
-      plan.textContent = `${p.label}${size ? ' · ~' + size : ''} · ${p.method === 'proxy' ? 'straight from the site' : p.method === 'shot' ? 'drawn here' : 'through ffmpeg'} · ${p.filename}`;
+      plan.textContent = `${p.label}${size ? ' · ~' + size : ''} · ${p.method === 'proxy' ? 'straight from the site' : 'through ffmpeg'} · ${p.filename}`;
       dl.disabled = false; cp.disabled = false;
     }catch(e){
       if(seq !== prepSeq) return;

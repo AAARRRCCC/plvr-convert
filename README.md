@@ -11,10 +11,8 @@ disk and nothing is kept.
 - **audio**: best as-is (m4a/opus/mp3), or converted to mp3/m4a/opus/ogg/wav
   with tags and cover art.
 - **mute**, **gif**, and **clip** (start/end) modes.
-- **screenshot**: an x.com post drawn as it looks on the page (name, text with
-  its links, media, the quoted post, the counts). An mp4 when the post or its
-  quote has a video, so the video plays inside the card; a png otherwise.
-  Theme (lights out / dim / light) and how many quotes deep to go are options.
+- **screenshot**: an x.com post rendered as on the page. mp4 if the post or
+  a quote has a video, png otherwise. Quote depth 0-3.
 - **filename styles** like cobalt's: pretty, basic, classic, nerdy.
 - multi-item posts (carousels, threads) show a picker.
 
