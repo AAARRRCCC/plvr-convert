@@ -1,6 +1,6 @@
 """convert.plvr.net: a self-hosted video downloader and remuxer.
 
-POST /api/resolve   {url}                       -> the media at that link
+POST /api/resolve   {url, mode?}                 -> the media at that link (mode "shot": the post itself)
 POST /api/prepare   {url, item?, options}       -> a signed download link
 GET  /api/download/<name>?t=<token>             -> the file, streamed
 GET  /api/sites                                 -> the sites yt-dlp supports
@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import plan as planning
 from . import resolve as rs
-from . import stream, tokens, tunnel
+from . import shot, stream, tokens, tunnel, tweet
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("convert")
@@ -110,6 +110,8 @@ async def api_resolve(req: Request):
     url = str(body.get("url") or "").strip()
     if not url:
         return err("paste a link first")
+    if str(body.get("mode") or "") == "shot":
+        return await _resolve_post(url, body.get("options"))
     try:
         key, info = await rs.resolve(url)
     except rs.ResolveError as e:
@@ -126,12 +128,46 @@ async def api_resolve(req: Request):
             "title": info.get("title"), "uploader": info.get("uploader") or info.get("channel")}
 
 
+async def _resolve_post(url: str, options) -> JSONResponse | dict:
+    tid = tweet.status_id(url)
+    if not tid:
+        return err("screenshots work for x.com and twitter.com post links", 422)
+    opts = planning.normalize(options)
+    try:
+        post = await tweet.fetch(tid, opts["shot_depth"])
+    except rs.ResolveError as e:
+        return err(str(e), 422)
+    except Exception:
+        log.exception("post fetch failed")
+        return err("something broke reading that post", 500)
+    return {"key": rs.cache_key(url), "media": shot.describe(post)}
+
+
+async def _shot_for(url: str, opts: dict) -> shot.Shot:
+    tid = tweet.status_id(url)
+    if not tid:
+        raise rs.ResolveError("screenshots work for x.com and twitter.com post links")
+    post = await tweet.fetch(tid, opts["shot_depth"])
+    return await asyncio.to_thread(shot.make, post, opts)
+
+
 @app.post("/api/prepare")
 async def api_prepare(req: Request):
     body = await req.json()
     url = str(body.get("url") or "").strip()
     item = body.get("item")
     opts = planning.normalize(body.get("options"))
+    if opts["mode"] == "shot":
+        try:
+            s = await _shot_for(url, opts)
+        except rs.ResolveError as e:
+            return err(str(e), 422)
+        except Exception:
+            log.exception("shot prepare failed")
+            return err("couldn't lay out that post", 500)
+        payload = {"u": url, "i": None, "o": {k: v for k, v in opts.items() if v != planning.DEFAULTS.get(k)}}
+        t = tokens.sign(payload)
+        return {"token": t, "url": f"/api/download/{quote(s.plan.filename)}?t={t}", **s.plan.describe(), "width": s.layout.width, "height": s.layout.height}
     try:
         key, info = await rs.resolve(url)
         media = rs.pick(info, int(item) if item is not None else None)
@@ -153,16 +189,23 @@ async def api_download(name: str, t: str, req: Request):
         return err("that link has expired, paste the video again", 403)
     ip = client_ip(req)
     opts = planning.normalize(payload.get("o"))
+    s = None
     try:
-        key, info = await rs.resolve(payload["u"])
-        media = rs.pick(info, int(payload["i"]) if payload.get("i") is not None else None)
-        p = planning.make(media, opts)
+        if opts["mode"] == "shot":
+            s = await _shot_for(payload["u"], opts)
+            p = s.plan
+        else:
+            key, info = await rs.resolve(payload["u"])
+            media = rs.pick(info, int(payload["i"]) if payload.get("i") is not None else None)
+            p = planning.make(media, opts)
     except rs.ResolveError as e:
         return err(str(e), 422)
     if not gate.acquire(ip):
         return err("too many downloads running right now, try again in a moment", 429)
     try:
-        if p.method == "proxy":
+        if s is not None:
+            started = await shot.start(s)
+        elif p.method == "proxy":
             started = await stream.proxy(p, req.headers.get("range"))
         else:
             started = await stream.ffmpeg(p, opts["start"])

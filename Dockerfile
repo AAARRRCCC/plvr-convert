@@ -1,5 +1,7 @@
 # One image: python + yt-dlp for reading sites, ffmpeg for muxing, deno so
-# yt-dlp can run YouTube's JavaScript challenges. Runs as an unprivileged user
+# yt-dlp can run YouTube's JavaScript challenges, and the fonts the post
+# screenshots are drawn with (Inter, Noto for other scripts, a colour emoji
+# face as the fallback when twemoji can't be fetched). Runs as an unprivileged user
 # on a read-only root; all writable paths are under /tmp.
 FROM python:3.13-slim-trixie
 
@@ -14,6 +16,7 @@ ENV APP_VERSION=$APP_VERSION \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl unzip \
+      fonts-inter fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji libfribidi0 \
  && curl -fsSL -A 'OpenAI File Downloader, XaiImageApiFetch/1.0' \
       -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
  && unzip -q /tmp/deno.zip -d /usr/local/bin && chmod 755 /usr/local/bin/deno && rm /tmp/deno.zip \

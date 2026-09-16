@@ -15,7 +15,8 @@ from .resolve import Fmt, ResolveError, formats
 
 # --------------------------------------------------------------- options ---
 
-MODES = ("auto", "audio", "mute", "gif")
+MODES = ("auto", "audio", "mute", "gif", "shot")
+SHOT_THEMES = ("dark", "dim", "light")
 QUALITIES = ("max", "2160", "1440", "1080", "720", "480", "360", "240", "144")
 VCODECS = ("h264", "vp9", "av1")
 CONTAINERS = ("auto", "mp4", "webm", "mkv")
@@ -28,6 +29,7 @@ DEFAULTS = {
     "aformat": "best", "abitrate": "192", "name": "random", "custom_name": "", "random_name": "",
     "metadata": True, "cover": True, "direct": False,
     "start": None, "end": None, "gif_fps": 12, "gif_width": 480,
+    "shot_theme": "dark", "shot_depth": 1, "shot_stats": True,
 }
 
 
@@ -50,8 +52,13 @@ def normalize(raw: dict | None) -> dict:
     o["custom_name"] = str(raw.get("custom_name") or "")[:150]
     random_name = str(raw.get("random_name") or "")
     o["random_name"] = random_name if re.fullmatch(r"[a-f0-9]{24}", random_name) else secrets.token_hex(12)
-    for k in ("metadata", "cover", "direct"):
+    for k in ("metadata", "cover", "direct", "shot_stats"):
         o[k] = bool(raw.get(k, o[k]))
+    choose("shot_theme", SHOT_THEMES)
+    try:
+        o["shot_depth"] = min(3, max(0, int(raw.get("shot_depth", 1))))
+    except (TypeError, ValueError):
+        o["shot_depth"] = 1
     for k in ("start", "end"):
         v = raw.get(k)
         try:
@@ -73,7 +80,7 @@ def normalize(raw: dict | None) -> dict:
 MIME = {
     "mp4": "video/mp4", "webm": "video/webm", "mkv": "video/x-matroska", "mov": "video/quicktime",
     "m4a": "audio/mp4", "mp3": "audio/mpeg", "opus": "audio/ogg", "ogg": "audio/ogg", "wav": "audio/wav",
-    "flac": "audio/flac", "gif": "image/gif", "ts": "video/mp2t", "3gp": "video/3gpp",
+    "flac": "audio/flac", "gif": "image/gif", "ts": "video/mp2t", "3gp": "video/3gpp", "png": "image/png",
 }
 MUXER = {"mp4": "mp4", "webm": "webm", "mkv": "matroska", "m4a": "ipod", "mp3": "mp3", "opus": "opus",
          "ogg": "ogg", "wav": "wav", "gif": "gif"}
@@ -82,7 +89,7 @@ FRAG = "frag_keyframe+empty_moov+default_base_moof"  # a streamable mp4: the hea
 
 @dataclass
 class Plan:
-    method: str                       # proxy | ffmpeg
+    method: str                       # proxy | ffmpeg | shot
     ext: str
     filename: str
     label: str                        # "1080p · h264 · merged", for the page
