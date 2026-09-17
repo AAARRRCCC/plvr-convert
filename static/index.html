@@ -625,7 +625,7 @@ body.dropping .drop{display:grid}
       if(seq !== prepSeq) return;
       current.prep = p;
       current.filenameExt = p.ext;
-      const name = $('#result-name'); name.value = p.filename; name.disabled = false;
+      const name = $('#result-name'); if(current.local.name !== 'custom') name.value = p.filename; name.disabled = false;
       const size = fmtSize(p.size);
       plan.textContent = `${p.label}${size ? ' · ~' + size : ''} · ${p.method === 'proxy' ? 'straight from the site' : 'through ffmpeg'} · ${p.filename}`;
       dl.disabled = false; cp.disabled = false;
