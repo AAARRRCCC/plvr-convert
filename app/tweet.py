@@ -94,15 +94,29 @@ async def fetch(tid: str, depth: int) -> dict:
 
 # ------------------------------------------------------------ normalizing ---
 
+MAX_SIDE = 1280   # a screenshot's video cell is at most 1036px wide, so 720p is enough
+
+
 def _pick_variant(m: dict) -> tuple[str | None, int]:
-    """The highest-bitrate mp4 of a video, and its bitrate."""
+    """The highest-bitrate mp4 of a video no larger than MAX_SIDE on its long
+    side (the smallest one if every variant is larger), and its bitrate.
+    Decoding a 4K source is most of the cost of composing a screenshot."""
     best, br = None, -1
+    small, small_side = None, None
     for v in m.get("variants") or []:
         if "mp4" not in str(v.get("content_type") or "") and not str(v.get("url", "")).split("?")[0].endswith(".mp4"):
             continue
         b = int(v.get("bitrate") or 0)
+        dims = re.search(r"/(\d+)x(\d+)/", str(v.get("url", "")))
+        side = max(int(dims.group(1)), int(dims.group(2))) if dims else 0
+        if side > MAX_SIDE:
+            if small_side is None or side < small_side:
+                small, small_side = v.get("url"), side
+            continue
         if b > br:
             best, br = v.get("url"), b
+    if best is None and small is not None:
+        best, br = small, 0
     if best is None and str(m.get("url", "")).split("?")[0].endswith(".mp4"):
         best = m["url"]
     return best, max(br, 0)

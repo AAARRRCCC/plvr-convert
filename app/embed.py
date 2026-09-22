@@ -55,7 +55,7 @@ RENDER_TTL = int(os.environ.get("RENDER_TTL", 3600))
 MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
-LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 30))  # seconds
+LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 20))  # seconds
 PRESET = os.environ.get("X264_PRESET", "superfast")
 # Discord downloads the whole video while it builds the preview and gives up
 # after about ten seconds, so the file is held to a size the house uplink
