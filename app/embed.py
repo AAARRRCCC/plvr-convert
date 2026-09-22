@@ -10,6 +10,11 @@ gets a page whose only tag is the png: redirected to a bare image, it would
 hide the link from the message. Every other fetcher gets Open Graph tags
 pointing at the same files.
 
+A video longer than LONG_VIDEO takes longer to compose than Discord waits,
+so it is not drawn at all: the post goes out as a plain embed, name, text and
+x.com's own video file. A shorter one that still misses the wait gets the
+same.
+
 Renders are kept on disk for RENDER_TTL and served with ranges, since chat
 apps seek in a video instead of reading it once. Run with
 
@@ -45,6 +50,7 @@ MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
 DISCORD_WAIT = float(os.environ.get("DISCORD_WAIT", 8))
+LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 30))  # seconds
 RENDER_TIMEOUT = 900
 DEPTH = planning.DEFAULTS["shot_depth"]
 FULL = 10_000                                        # lines of text: no cut
@@ -227,6 +233,40 @@ def _og(req: Request, m: dict, bare: bool = False) -> str:
 </head><body></body></html>"""
 
 
+def _lead(post: dict) -> dict | None:
+    """The video the render's length and sound come from: the first real
+    video in the post or its quotes, a gif only when there is nothing else."""
+    vids = tweet.videos(post)
+    return next((m for m in vids if m["kind"] == "video"), vids[0] if vids else None)
+
+
+def _plain(post: dict) -> str:
+    """A plain embed: name, text, and the video as x.com serves it."""
+    e = lambda s: html.escape(str(s), quote=True)
+    v = _lead(post)
+    title = f"{post['name']} (@{post['handle']})"
+    text = tweet.plain_text(post)
+    q = post.get("quote")
+    if q:
+        text += f"\n\n↘️ Quoting {q['name']} (@{q['handle']})\n{tweet.plain_text(q)}"
+    tags = [
+        ("og:title", title), ("og:description", text[:1000]), ("og:url", post["url"]), ("og:type", "video.other"),
+        ("og:video", v["url"]), ("og:video:secure_url", v["url"]), ("og:video:type", "video/mp4"),
+        ("og:video:width", v["w"]), ("og:video:height", v["h"]),
+    ]
+    if v.get("poster"):
+        tags += [("og:image", v["poster"]), ("og:image:width", v["w"]), ("og:image:height", v["h"])]
+    head = "\n".join(f'<meta property="{k}" content="{e(val)}">' for k, val in tags)
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<title>{e(title)}</title>
+<meta name="theme-color" content="#000000">
+<meta name="twitter:card" content="player">
+{head}
+<meta http-equiv="refresh" content="0; url={e(post['url'])}">
+</head><body></body></html>"""
+
+
 def _to_x(req: Request) -> RedirectResponse:
     q = f"?{req.url.query}" if req.url.query else ""
     return RedirectResponse(f"https://x.com{req.url.path}{q}", status_code=302)
@@ -266,17 +306,19 @@ async def post(path: str, req: Request):
     try:
         meta = _meta(tid)
         if meta is None:
+            post_ = await tweet.fetch(tid, DEPTH)
+            lead = _lead(post_)
+            if lead and (lead.get("duration") or 0) > LONG_VIDEO:
+                return HTMLResponse(_plain(post_))
             # the tags need only the size, so they go out while the render
             # runs and the file requests that follow wait on it; only Discord's
             # video redirect has to wait here
             job = render(tid)
-            meta = await asyncio.to_thread(_pending, tid, await tweet.fetch(tid, DEPTH))
+            meta = await asyncio.to_thread(_pending, tid, post_)
             if discord and meta["ext"] == "mp4":
-                # Discord gives up on a slow link; past the wait it gets the
-                # tags instead, and the video is ready by the time anyone plays it
                 done, _ = await asyncio.wait({job}, timeout=DISCORD_WAIT)
                 if not done:
-                    return HTMLResponse(_og(req, meta))
+                    return HTMLResponse(_plain(post_))
                 meta = job.result()
     except Busy:
         return _to_x(req)
