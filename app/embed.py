@@ -15,8 +15,11 @@ fragmented mp4, which plays from its first fragment, and a request that
 arrives mid-render is streamed the file as it grows. When the render is done
 the file is repacked with its index up front, and from then on it is served
 whole, with ranges, since chat apps seek in a video instead of reading it
-once. A video longer than LONG_VIDEO is not drawn: the post goes out as a
-plain embed, name, text and x.com's own video file.
+once. Discord reads the whole file before it shows the preview and gives up
+after about ten seconds, so the bitrate is set to keep the file near
+TARGET_MB, and a video longer than LONG_VIDEO, which takes longer than that
+to compose, is not drawn: the post goes out as a plain embed, name, text and
+x.com's own video file.
 
 Renders are kept on disk for RENDER_TTL. Run with
 
@@ -52,9 +55,13 @@ RENDER_TTL = int(os.environ.get("RENDER_TTL", 3600))
 MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
-LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 600))  # seconds
+LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 30))  # seconds
 PRESET = os.environ.get("X264_PRESET", "superfast")
-MAXRATE = os.environ.get("MAXRATE", "3M")           # keeps a long render streamable over the house uplink
+# Discord downloads the whole video while it builds the preview and gives up
+# after about ten seconds, so the file is held to a size the house uplink
+# sends well inside that: the bitrate comes from the video's length
+TARGET_MB = float(os.environ.get("TARGET_MB", 10))
+MAXRATE_KBPS = 3000
 RENDER_TIMEOUT = 900
 DEPTH = planning.DEFAULTS["shot_depth"]
 FULL = 10_000                                        # lines of text: no cut
@@ -149,7 +156,9 @@ async def _mp4(s: shot.Shot, dest: Path) -> None:
     while it grows; the json written after it is what marks it finished."""
     holes = await asyncio.to_thread(card.render, s.layout, True)
     # a keyframe every 2s: each fragment starts at one, so the first is out quickly
-    argv = shot.command(s, PRESET) + ["-g", "60", "-maxrate", MAXRATE, "-bufsize", "6M", "-f", "mp4", "-movflags", FRAG, str(dest)]
+    dur = float(s.plan.args[0]) if s.plan.args else 0
+    kbps = int(min(MAXRATE_KBPS, max(400, TARGET_MB * 8000 / dur - 160))) if dur else MAXRATE_KBPS
+    argv = shot.command(s, PRESET) + ["-g", "60", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-f", "mp4", "-movflags", FRAG, str(dest)]
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(holes), RENDER_TIMEOUT)

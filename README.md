@@ -25,7 +25,7 @@ it renders, so it plays like an upload; other link-preview fetchers get Open
 Graph tags; a browser goes on to x.com. Run it with `uvicorn app.embed:app`.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
 `EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `LONG_VIDEO`, `X264_PRESET`,
-`MAXRATE`.
+`TARGET_MB`.
 
 ## Run it
 
