@@ -10,13 +10,15 @@ gets a page whose only tag is the png: redirected to a bare image, it would
 hide the link from the message. Every other fetcher gets Open Graph tags
 pointing at the same files.
 
-A video longer than LONG_VIDEO takes longer to compose than Discord waits,
-so it is not drawn at all: the post goes out as a plain embed, name, text and
-x.com's own video file. A shorter one that still misses the wait gets the
-same.
+Discord is redirected at once, without waiting on the render: ffmpeg writes a
+fragmented mp4, which plays from its first fragment, and a request that
+arrives mid-render is streamed the file as it grows. When the render is done
+the file is repacked with its index up front, and from then on it is served
+whole, with ranges, since chat apps seek in a video instead of reading it
+once. A video longer than LONG_VIDEO is not drawn: the post goes out as a
+plain embed, name, text and x.com's own video file.
 
-Renders are kept on disk for RENDER_TTL and served with ranges, since chat
-apps seek in a video instead of reading it once. Run with
+Renders are kept on disk for RENDER_TTL. Run with
 
     uvicorn app.embed:app
 """
@@ -33,11 +35,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from . import card, shot, tunnel, tweet
 from . import plan as planning
 from . import resolve as rs
+from .plan import FRAG
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("embed")
@@ -49,8 +52,9 @@ RENDER_TTL = int(os.environ.get("RENDER_TTL", 3600))
 MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
-DISCORD_WAIT = float(os.environ.get("DISCORD_WAIT", 8))
-LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 30))  # seconds
+LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 600))  # seconds
+PRESET = os.environ.get("X264_PRESET", "superfast")
+MAXRATE = os.environ.get("MAXRATE", "3M")           # keeps a long render streamable over the house uplink
 RENDER_TIMEOUT = 900
 DEPTH = planning.DEFAULTS["shot_depth"]
 FULL = 10_000                                        # lines of text: no cut
@@ -141,23 +145,55 @@ async def _render(tid: str) -> dict:
 
 
 async def _mp4(s: shot.Shot, dest: Path) -> None:
+    """Compose straight into dest as a fragmented mp4, so it can be streamed
+    while it grows; the json written after it is what marks it finished."""
     holes = await asyncio.to_thread(card.render, s.layout, True)
-    part = dest.with_suffix(".part.mp4")
-    # a whole file with the index up front, so players can seek straight away
-    argv = shot.command(s, "superfast") + ["-movflags", "+faststart", str(part)]
+    # a keyframe every 2s: each fragment starts at one, so the first is out quickly
+    argv = shot.command(s, PRESET) + ["-g", "60", "-maxrate", MAXRATE, "-bufsize", "6M", "-f", "mp4", "-movflags", FRAG, str(dest)]
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(holes), RENDER_TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        part.unlink(missing_ok=True)
         raise rs.ResolveError("the video took too long to compose")
     if proc.returncode != 0:
-        part.unlink(missing_ok=True)
         lines = err.decode(errors="replace").strip().splitlines()
         raise rs.ResolveError("the video couldn't be composed: " + (lines[-1][:160] if lines else "unknown error"))
-    part.replace(dest)
+    # repack with the index up front for players that seek; a stream still
+    # reading the fragmented file keeps its handle, and if the swap fails
+    # the fragmented file plays as it is
+    packed = dest.with_name(dest.stem + ".packed.mp4")
+    proc = await asyncio.create_subprocess_exec(shot.FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", str(dest),
+                                                "-c", "copy", "-movflags", "+faststart", str(packed),
+                                                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    if await proc.wait() == 0:
+        try:
+            packed.replace(dest)
+        except OSError:
+            packed.unlink(missing_ok=True)
+    else:
+        packed.unlink(missing_ok=True)
+
+
+async def _tail(path: Path, job: asyncio.Task):
+    """The file as ffmpeg writes it, until the render is done."""
+    while not path.exists():
+        if job.done():
+            return
+        await asyncio.sleep(0.1)
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1 << 16)
+            if chunk:
+                yield chunk
+            elif job.done():
+                rest = f.read()
+                if rest:
+                    yield rest
+                return
+            else:
+                await asyncio.sleep(0.1)
 
 
 def _write(p: Path, data: bytes) -> None:
@@ -308,6 +344,11 @@ async def file(name: str):
         return Response(status_code=404)
     tid, ext = m.groups()
     try:
+        if ext == "mp4" and _meta(tid) is None:
+            job = render(tid)
+            if (await _layout_ext(tid)) == "mp4":
+                log.info("streaming %s mid-render", tid)
+                return StreamingResponse(_tail(DIR / f"{tid}.mp4", job), media_type="video/mp4", headers={"Cache-Control": "no-store"})
         meta = await media(tid)
     except Busy:
         return Response(status_code=503, headers={"Retry-After": "30"})
@@ -334,16 +375,11 @@ async def post(path: str, req: Request):
             lead = _lead(post_)
             if lead and (lead.get("duration") or 0) > LONG_VIDEO:
                 return HTMLResponse(_plain(req, post_))
-            # the tags need only the size, so they go out while the render
-            # runs and the file requests that follow wait on it; only Discord's
-            # video redirect has to wait here
-            job = render(tid)
+            # the tags and the redirect need only the size and kind, so they go
+            # out while the render runs; the file requests that follow stream
+            # the mp4 as it is written, or wait on the png
+            render(tid)
             meta = await asyncio.to_thread(_pending, tid, post_)
-            if discord and meta["ext"] == "mp4":
-                done, _ = await asyncio.wait({job}, timeout=DISCORD_WAIT)
-                if not done:
-                    return HTMLResponse(_plain(req, post_))
-                meta = job.result()
     except Busy:
         return _to_x(req)
     except rs.ResolveError as e:
@@ -352,6 +388,12 @@ async def post(path: str, req: Request):
     if discord and meta["ext"] == "mp4":
         return RedirectResponse(f"{_base(req)}/m/{tid}.mp4", status_code=302)
     return HTMLResponse(_og(req, meta, bare=discord))
+
+
+async def _layout_ext(tid: str) -> str:
+    """Whether a post renders to mp4 or png, from its layout alone."""
+    post = await tweet.fetch(tid, DEPTH)
+    return (await asyncio.to_thread(_pending, tid, post))["ext"]
 
 
 def _pending(tid: str, post: dict) -> dict:
