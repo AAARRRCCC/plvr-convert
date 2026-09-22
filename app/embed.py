@@ -17,6 +17,15 @@ status carries the text and x.com's own media instead.
 Every other fetcher gets Open Graph tags pointing at the same files, or for a
 long video, the text and x.com's video.
 
+For trying other looks in Discord, `?v=` on the link picks one (the status id
+carries it as "<v>z<id>"):
+    1  Discord's own text, the quote as a blockquote, and x.com's media from
+       the post and its quote together
+    2  Discord's own text for the post, the quoted post as a screenshot
+    3  the screenshot laid out side by side (app/side.py)
+    4  the screenshot on a wide column with the media kept short, so it is
+       wider than it is tall
+
 Renders are kept on disk for RENDER_TTL and served with ranges, since chat
 apps seek in a video instead of reading it once. Run with
 
@@ -38,7 +47,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import card, shot, tunnel, tweet
+from . import card, shot, side, tunnel, tweet
 from . import plan as planning
 from . import resolve as rs
 
@@ -56,6 +65,7 @@ LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 30))  # seconds
 RENDER_TIMEOUT = 900
 DEPTH = planning.DEFAULTS["shot_depth"]
 FULL = 10_000                                        # lines of text: no cut
+WIDE = {"col": 900, "media_h": 220}                  # ?v=4, css px
 
 # Discord's unfurler sends its own UA and, for some fetches, one of these
 # fixed old Firefox strings.
@@ -116,34 +126,46 @@ async def media(tid: str) -> dict:
     return await asyncio.shield(render(tid))
 
 
-async def _render(tid: str) -> dict:
+def _build(key: str, post: dict):
+    """What a render key draws: (the Shot ffmpeg composes, the card drawer).
+    A key is a post id, with "s" after it for the side-by-side layout or "w"
+    for the wide one."""
+    if key.endswith("s"):
+        sd = side.make(post, planning.DEFAULTS["shot_stats"], FULL)
+        if sd is not None:
+            return sd.shot, lambda holes: side.draw(sd, holes)
+    s = shot.make(post, dict(planning.DEFAULTS, mode="shot"), FULL, **(WIDE if key.endswith("w") else {}))
+    return s, lambda holes: card.render(s.layout, holes)
+
+
+async def _render(key: str) -> dict:
     t0 = time.time()
-    post = await tweet.fetch(tid, DEPTH)
-    s = await asyncio.to_thread(shot.make, post, dict(planning.DEFAULTS, mode="shot"), FULL)
+    post = await tweet.fetch(key.rstrip("sw"), DEPTH)
+    s, draw = await asyncio.to_thread(_build, key, post)
     L = s.layout
     meta = {
-        "id": tid, "url": post["url"], "name": post["name"], "handle": post["handle"],
+        "id": key, "url": post["url"], "name": post["name"], "handle": post["handle"],
         "text": tweet.plain_text(post), "width": L.width, "height": L.height,
         "ext": "mp4" if L.cells else "png",
     }
     async with _slots:
         # the poster is the card with each video's thumbnail drawn in: the png
         # itself for a post without video, the preview image for one with,
-        # drawn while ffmpeg runs since Discord only waits on the mp4
-        poster = asyncio.to_thread(card.render, L, False)
+        # drawn while ffmpeg runs
+        poster = asyncio.to_thread(draw, False)
         if L.cells:
-            png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{tid}.mp4"))
+            png, _ = await asyncio.gather(poster, _mp4(s, draw, DIR / f"{key}.mp4"))
         else:
             png = await poster
-        _write(DIR / f"{tid}.png", png)
-    _write(DIR / f"{tid}.json", json.dumps(meta).encode())
-    log.info("rendered %s %s %dx%d in %.1fs", tid, meta["ext"], L.width, L.height, time.time() - t0)
+        _write(DIR / f"{key}.png", png)
+    _write(DIR / f"{key}.json", json.dumps(meta).encode())
+    log.info("rendered %s %s %dx%d in %.1fs", key, meta["ext"], L.width, L.height, time.time() - t0)
     await asyncio.to_thread(_prune)
     return meta
 
 
-async def _mp4(s: shot.Shot, dest: Path) -> None:
-    holes = await asyncio.to_thread(card.render, s.layout, True)
+async def _mp4(s: shot.Shot, draw, dest: Path) -> None:
+    holes = await asyncio.to_thread(draw, True)
     part = dest.with_suffix(".part.mp4")
     # a whole file with the index up front, so players can seek straight away
     argv = shot.command(s, "superfast") + ["-movflags", "+faststart", str(part)]
@@ -239,13 +261,13 @@ def _text(post: dict) -> str:
     return text
 
 
-def _html(post: dict) -> str:
+def _html(post: dict, quote: bool = True) -> str:
     """The text as Mastodon status content, the quoted post as a blockquote."""
     e = lambda s: html.escape(str(s), quote=True)
     lines = lambda p: "<br>".join(e(line) for line in tweet.plain_text(p).split("\n"))
     out = f"<p>{lines(post)}</p>" if tweet.plain_text(post) else ""
     q = post.get("quote")
-    if q:
+    if q and quote:
         out += f'<blockquote><b>Quoting <a href="{e(q["url"])}">{e(q["name"])}</a> @{e(q["handle"])}</b><br>{lines(q)}</blockquote>'
     return out
 
@@ -255,9 +277,10 @@ def _attachment(n: int, kind: str, url: str, preview: str | None, w: int, h: int
             "description": None, "meta": {"original": {"width": w, "height": h}}}
 
 
-def _native(post: dict) -> list[dict]:
-    """x.com's own media: the post's, or the quoted post's when it has none."""
-    items = post["media"] or (post.get("quote") or {}).get("media") or []
+def _native(post: dict, both: bool = False) -> list[dict]:
+    """x.com's own media: the post's, or the quoted post's when it has none;
+    with `both`, the post's and then its quotes', up to four."""
+    items = side.items(post) if both else (post["media"] or (post.get("quote") or {}).get("media") or [])
     kinds = {"photo": "image", "video": "video", "gif": "gifv"}
     return [_attachment(i, kinds[m["kind"]], m["url"], m.get("poster"), m["w"], m["h"]) for i, m in enumerate(items)]
 
@@ -285,9 +308,10 @@ def _plain(post: dict) -> str:
 </head><body></body></html>"""
 
 
-def _activity(req: Request, post: dict) -> str:
+def _activity(req: Request, post: dict, v: str) -> str:
     """Discord's page: the link that makes it read /api/v1/statuses/<id>."""
     e = lambda s: html.escape(str(s), quote=True)
+    sid = f"{v}z{post['id']}" if v else post["id"]
     title = f"{post['name']} (@{post['handle']})"
     return f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -295,7 +319,7 @@ def _activity(req: Request, post: dict) -> str:
 <meta name="theme-color" content="#000000">
 <meta property="og:title" content="{e(title)}">
 <meta property="og:description" content="{e(_text(post)[:1000])}">
-<link type="application/activity+json" href="{e(_base(req))}/users/{e(post['handle'])}/statuses/{e(post['id'])}">
+<link type="application/activity+json" href="{e(_base(req))}/users/{e(post['handle'])}/statuses/{e(sid)}">
 <meta http-equiv="refresh" content="0; url={e(post['url'])}">
 </head><body></body></html>"""
 
@@ -315,32 +339,53 @@ async def healthz():
     return {"ok": True, "version": VERSION, "rendering": len(_jobs)}
 
 
-@app.get("/api/v1/statuses/{tid}")
-async def status(tid: str, req: Request):
+async def _card(base: str, key: str, post: dict) -> dict:
+    """The screenshot for a render key as an attachment, the render started
+    if it isn't on disk; its file request waits on it."""
+    meta = _meta(key)
+    if meta is None:
+        render(key)
+        meta = await asyncio.to_thread(_pending, key, post)
+    kind = "video" if meta["ext"] == "mp4" else "image"
+    return _attachment(0, kind, f"{base}/m/{key}.{meta['ext']}", f"{base}/m/{key}.png", meta["width"], meta["height"])
+
+
+@app.get("/api/v1/statuses/{sid}")
+async def status(sid: str, req: Request):
     """The post as a Mastodon status, the shape Discord reads for these embeds."""
-    if not re.fullmatch(r"\d{1,20}", tid):
+    m = re.fullmatch(r"(?:([1234])z)?(\d{1,20})", sid)
+    if not m:
         return JSONResponse({"error": "Record not found"}, status_code=404)
+    v, tid = m.group(1) or "", m.group(2)
     try:
         post = await tweet.fetch(tid, DEPTH)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
     base = _base(req)
     content, media_ = _html(post), _native(post)
-    if not _long(post):
-        try:
-            meta = _meta(tid)
-            if meta is None:
-                render(tid)
-                meta = await asyncio.to_thread(_pending, tid, post)
+    try:
+        q = post.get("quote")
+        if v == "1" or (v == "2" and not q):
+            media_ = _native(post, both=True)
+        elif v == "2":
+            qpost = await tweet.fetch(q["id"], DEPTH)
+            if _long(qpost):
+                media_ = _native(post, both=True)
+            else:
+                content = _html(post, quote=False)
+                own = [dict(a, id=str(i)) for i, a in enumerate(_native(dict(post, quote=None))[:3])]
+                media_ = own + [dict(await _card(base, q["id"], qpost), id=str(len(own)))]
+        elif not _long(post):
             # the screenshot already shows the text, so the status carries none
-            kind = "video" if meta["ext"] == "mp4" else "image"
-            content = ""
-            media_ = [_attachment(0, kind, f"{base}/m/{tid}.{meta['ext']}", f"{base}/m/{tid}.png", meta["width"], meta["height"])]
-        except Busy:
-            pass
+            key = tid + {"3": "s" if side.items(post) else "", "4": "w"}.get(v, "")
+            content, media_ = "", [await _card(base, key, post)]
+    except Busy:
+        pass
+    except rs.ResolveError as e:
+        log.info("status %s: %s", sid, e)
     created = datetime.fromtimestamp(post["created"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     return {
-        "id": tid, "url": post["url"], "uri": post["url"], "created_at": created, "edited_at": None,
+        "id": sid, "url": post["url"], "uri": post["url"], "created_at": created, "edited_at": None,
         "content": content, "spoiler_text": "", "sensitive": False, "visibility": "public", "language": None,
         "in_reply_to_id": None, "in_reply_to_account_id": None, "reblog": None, "application": {"name": None, "website": None},
         "media_attachments": media_, "mentions": [], "tags": [], "emojis": [],
@@ -354,7 +399,7 @@ async def status(tid: str, req: Request):
 
 @app.get("/m/{name}")
 async def file(name: str):
-    m = re.fullmatch(r"(\d{1,20})\.(mp4|png)", name)
+    m = re.fullmatch(r"(\d{1,20}[sw]?)\.(mp4|png)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
@@ -381,13 +426,16 @@ async def post(path: str, req: Request):
     try:
         post_ = await tweet.fetch(tid, DEPTH)
         if discord:
+            v = req.query_params.get("v", "")
+            v = v if v in ("1", "2", "3", "4") else ""
             # the status Discord asks for next points at the render; start it now
-            if not _long(post_) and _meta(tid) is None:
+            key = {"": tid, "3": tid + "s", "4": tid + "w"}.get(v)
+            if key and not _long(post_) and _meta(key) is None:
                 try:
-                    render(tid)
+                    render(key)
                 except Busy:
                     pass
-            return HTMLResponse(_activity(req, post_))
+            return HTMLResponse(_activity(req, post_, v))
         if _long(post_):
             return HTMLResponse(_plain(post_))
         meta = _meta(tid)
@@ -404,8 +452,8 @@ async def post(path: str, req: Request):
     return HTMLResponse(_og(req, meta))
 
 
-def _pending(tid: str, post: dict) -> dict:
+def _pending(key: str, post: dict) -> dict:
     """What the tags need while the render is still running."""
-    L = card.layout(post, "dark", planning.DEFAULTS["shot_stats"], max_lines=FULL)
-    return {"id": tid, "url": post["url"], "name": post["name"], "handle": post["handle"], "text": tweet.plain_text(post),
+    L = _build(key, post)[0].layout
+    return {"id": key, "url": post["url"], "name": post["name"], "handle": post["handle"], "text": tweet.plain_text(post),
             "width": L.width, "height": L.height, "ext": "mp4" if L.cells else "png"}
