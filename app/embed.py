@@ -339,8 +339,9 @@ async def oembed(name: str):
         post = await tweet.fetch(m.group(1), DEPTH)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
-    text = _text(post)
-    # Discord cuts an author name at 256 characters
+    # Discord shows about three lines of an author name and cuts it at 256
+    # characters, so the line breaks go
+    text = " ".join(_text(post).split())
     if len(text) > 256:
         text = text[:255].rstrip() + "…"
     return {"version": "1.0", "type": "link", "author_name": text, "author_url": post["url"]}
