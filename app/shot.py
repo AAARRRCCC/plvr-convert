@@ -95,6 +95,27 @@ def _graph(L: card.Layout) -> tuple[list[str], str, int]:
     return parts, "out", master_idx
 
 
+def command(shot: Shot, preset: str = "veryfast") -> list[str]:
+    """ffmpeg reading the card png on stdin and each video through the tunnel,
+    everything up to the output: the caller adds where it goes."""
+    L, p = shot.layout, shot.plan
+    argv = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "png_pipe", "-i", "pipe:0"]
+    for c in L.cells:
+        assert_public(c.item["url"])
+        f = _fmt(c.item)
+        if not c.master:
+            argv += ["-stream_loop", "-1"]
+        argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
+    parts, out, master = _graph(L)
+    dur = float(p.args[0]) if p.args else 0
+    argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]", "-map", f"{master}:a?",
+             "-c:v", "libx264", "-preset", preset, "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", "30",
+             "-c:a", "aac", "-b:a", "160k", "-shortest"]
+    if dur:
+        argv += ["-t", f"{dur:.3f}"]
+    return argv
+
+
 async def start(shot: Shot) -> Started:
     L, p = shot.layout, shot.plan
     t0 = time.time()
@@ -106,21 +127,7 @@ async def start(shot: Shot) -> Started:
             yield b""
         return Started(png, nothing(), 200, {"content-length": str(len(png))})
 
-    argv = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "png_pipe", "-i", "pipe:0"]
-    for c in L.cells:
-        assert_public(c.item["url"])
-        f = _fmt(c.item)
-        if not c.master:
-            argv += ["-stream_loop", "-1"]
-        argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
-    parts, out, master = _graph(L)
-    dur = float(p.args[0]) if p.args else 0
-    argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]", "-map", f"{master}:a?",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", "30",
-             "-c:a", "aac", "-b:a", "160k", "-shortest"]
-    if dur:
-        argv += ["-t", f"{dur:.3f}"]
-    argv += ["-f", "mp4", "-movflags", FRAG, "pipe:1"]
+    argv = command(shot) + ["-f", "mp4", "-movflags", FRAG, "pipe:1"]
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=CHUNK * 4)
     err: list[bytes] = []
 
