@@ -52,8 +52,8 @@ def describe(post: dict) -> dict:
     }
 
 
-def make(post: dict, o: dict) -> Shot:
-    L = card.layout(post, "dark", o["shot_stats"])
+def make(post: dict, o: dict, max_lines: int = card.MAX_LINES) -> Shot:
+    L = card.layout(post, "dark", o["shot_stats"], max_lines=max_lines)
     info = {"title": tweet.plain_text(post)[:80] or post["handle"], "id": post["id"], "extractor_key": "twitter"}
     size = f"{L.width}×{L.height}"
     if L.cells:

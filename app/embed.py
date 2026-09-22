@@ -3,10 +3,12 @@
     https://<this host>/<user>/status/<id>
 
 A person opening it is sent on to the same path on x.com. A link-preview
-fetcher gets the screenshot convert draws: Discord is redirected to the file
-itself (an mp4 when the post or its quote has a video, a png otherwise), so it
-shows up like an uploaded attachment; every other fetcher gets a page of Open
-Graph tags pointing at the same files.
+fetcher gets the screenshot convert draws, with the post's whole text rather
+than x.com's "Show more" cut. When the post or its quote has a video, Discord
+is redirected to the mp4 itself, so it plays like an upload. Otherwise Discord
+gets a page whose only tag is the png: redirected to a bare image, it would
+hide the link from the message. Every other fetcher gets Open Graph tags
+pointing at the same files.
 
 Renders are kept on disk for RENDER_TTL and served with ranges, since chat
 apps seek in a video instead of reading it once. Run with
@@ -44,6 +46,8 @@ RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
 DISCORD_WAIT = float(os.environ.get("DISCORD_WAIT", 8))
 RENDER_TIMEOUT = 900
+DEPTH = planning.DEFAULTS["shot_depth"]
+FULL = 10_000                                        # lines of text: no cut
 
 # Discord's unfurler sends its own UA and, for some fetches, one of these
 # fixed old Firefox strings.
@@ -106,8 +110,8 @@ async def media(tid: str) -> dict:
 
 async def _render(tid: str) -> dict:
     t0 = time.time()
-    post = await tweet.fetch(tid, planning.DEFAULTS["shot_depth"])
-    s = await asyncio.to_thread(shot.make, post, dict(planning.DEFAULTS, mode="shot"))
+    post = await tweet.fetch(tid, DEPTH)
+    s = await asyncio.to_thread(shot.make, post, dict(planning.DEFAULTS, mode="shot"), FULL)
     L = s.layout
     meta = {
         "id": tid, "url": post["url"], "name": post["name"], "handle": post["handle"],
@@ -116,11 +120,14 @@ async def _render(tid: str) -> dict:
     }
     async with _slots:
         # the poster is the card with each video's thumbnail drawn in: the png
-        # itself for a post without video, the preview image for one with
-        poster = await asyncio.to_thread(card.render, L, False)
-        _write(DIR / f"{tid}.png", poster)
+        # itself for a post without video, the preview image for one with,
+        # drawn while ffmpeg runs since Discord only waits on the mp4
+        poster = asyncio.to_thread(card.render, L, False)
         if L.cells:
-            await _mp4(s, DIR / f"{tid}.mp4")
+            png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{tid}.mp4"))
+        else:
+            png = await poster
+        _write(DIR / f"{tid}.png", png)
     _write(DIR / f"{tid}.json", json.dumps(meta).encode())
     log.info("rendered %s %s %dx%d in %.1fs", tid, meta["ext"], L.width, L.height, time.time() - t0)
     await asyncio.to_thread(_prune)
@@ -131,7 +138,7 @@ async def _mp4(s: shot.Shot, dest: Path) -> None:
     holes = await asyncio.to_thread(card.render, s.layout, True)
     part = dest.with_suffix(".part.mp4")
     # a whole file with the index up front, so players can seek straight away
-    argv = shot.command(s) + ["-movflags", "+faststart", str(part)]
+    argv = shot.command(s, "superfast") + ["-movflags", "+faststart", str(part)]
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(holes), RENDER_TIMEOUT)
@@ -184,10 +191,21 @@ def _base(req: Request) -> str:
     return f"https://{req.headers.get('host') or req.url.hostname}"
 
 
-def _og(req: Request, m: dict) -> str:
+def _og(req: Request, m: dict, bare: bool = False) -> str:
+    """The Open Graph page; `bare` is the image and nothing else, for Discord."""
     base = _base(req)
     e = lambda s: html.escape(str(s), quote=True)
     title = f"{m['name']} (@{m['handle']})"
+    if bare:
+        return f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="theme-color" content="#000000">
+<meta name="twitter:card" content="summary_large_image">
+<meta property="og:image" content="{e(base)}/m/{e(m['id'])}.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="{m['width']}">
+<meta property="og:image:height" content="{m['height']}">
+</head><body></body></html>"""
     tags = [
         ("og:site_name", "x.com"), ("og:title", title), ("og:description", m["text"][:300]), ("og:url", m["url"]),
         ("og:image", f"{base}/m/{m['id']}.png"), ("og:image:type", "image/png"),
@@ -248,27 +266,30 @@ async def post(path: str, req: Request):
     try:
         meta = _meta(tid)
         if meta is None:
+            # the tags need only the size, so they go out while the render
+            # runs and the file requests that follow wait on it; only Discord's
+            # video redirect has to wait here
             job = render(tid)
-            if discord:
+            meta = await asyncio.to_thread(_pending, tid, await tweet.fetch(tid, DEPTH))
+            if discord and meta["ext"] == "mp4":
                 # Discord gives up on a slow link; past the wait it gets the
                 # tags instead, and the video is ready by the time anyone plays it
                 done, _ = await asyncio.wait({job}, timeout=DISCORD_WAIT)
                 if not done:
-                    post_ = await tweet.fetch(tid, planning.DEFAULTS["shot_depth"])
-                    return HTMLResponse(_og(req, _pending(tid, post_)))
-            meta = await asyncio.shield(job)
+                    return HTMLResponse(_og(req, meta))
+                meta = job.result()
     except Busy:
         return _to_x(req)
     except rs.ResolveError as e:
         log.info("post %s: %s", tid, e)
         return _to_x(req)
-    if discord:
-        return RedirectResponse(f"{_base(req)}/m/{tid}.{meta['ext']}", status_code=302)
-    return HTMLResponse(_og(req, meta))
+    if discord and meta["ext"] == "mp4":
+        return RedirectResponse(f"{_base(req)}/m/{tid}.mp4", status_code=302)
+    return HTMLResponse(_og(req, meta, bare=discord))
 
 
 def _pending(tid: str, post: dict) -> dict:
     """What the tags need while the render is still running."""
-    L = card.layout(post, "dark", planning.DEFAULTS["shot_stats"])
+    L = card.layout(post, "dark", planning.DEFAULTS["shot_stats"], max_lines=FULL)
     return {"id": tid, "url": post["url"], "name": post["name"], "handle": post["handle"], "text": tweet.plain_text(post),
             "width": L.width, "height": L.height, "ext": "mp4" if L.cells else "png"}

@@ -575,7 +575,7 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
             (items[2], x, y + hh + gap, hw, hh, "cover"), (items[3], x + hw + gap, y + hh + gap, hw, hh, "cover")], h
 
 
-def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None) -> Layout:
+def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES) -> Layout:
     T = THEMES.get(theme, THEMES["dark"])
     L = Layout(COL * S, 0, T)
     ops = L.ops
@@ -668,7 +668,7 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         ops.append(("text", f"Replying to @{post['replying_to']}", "regular", 15, px(x0), px(y), T["gray"], T["blue"]))
         y += 20
     if post["spans"]:
-        t = Text.make(post["spans"], 15, 20, False, T["text"], T["blue"], cw, MAX_LINES, T["blue"])
+        t = Text.make(post["spans"], 15, 20, False, T["text"], T["blue"], cw, max_lines, T["blue"])
         ops.append(("lines", t, px(x0), px(y)))
         y += t.height
     if post["media"]:
