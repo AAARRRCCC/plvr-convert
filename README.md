@@ -20,13 +20,11 @@ disk and nothing is kept.
 
 `app/embed.py` is a second app in the same image: put its domain in place of
 `x.com` in a post link and chat apps show the screenshot instead of x.com's
-own preview. Discord is served a Mastodon status (`/api/v1/statuses/<id>`)
-whose media is the mp4 or png, which it shows at the embed's full width;
-other link-preview fetchers get Open Graph tags; a browser goes on to x.com.
-Posts with a video over `LONG_VIDEO` seconds carry the text and x.com's own
-media instead. Run it with `uvicorn app.embed:app`. Env: `EMBED_DIR` (where
-renders are kept, default `/tmp/embed`), `RENDER_TTL`, `EMBED_MAX_MB`,
-`RENDERS`, `RENDER_QUEUE`, `LONG_VIDEO`.
+own preview. Discord is redirected to the mp4 or png itself, so it plays like
+an upload; other link-preview fetchers get Open Graph tags; a browser goes on
+to x.com. Run it with `uvicorn app.embed:app`. Env: `EMBED_DIR` (where renders
+are kept, default `/tmp/embed`), `RENDER_TTL`, `EMBED_MAX_MB`, `RENDERS`,
+`DISCORD_WAIT`.
 
 ## Run it
 

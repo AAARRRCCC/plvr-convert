@@ -575,11 +575,9 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
             (items[2], x, y + hh + gap, hw, hh, "cover"), (items[3], x + hw + gap, y + hh + gap, hw, hh, "cover")], h
 
 
-def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES, col: int = COL,
-           media_h: float | None = None) -> Layout:
-    """`media_h` caps each media block's height, shrinking it to the centre."""
+def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES) -> Layout:
     T = THEMES.get(theme, THEMES["dark"])
-    L = Layout(col * S, 0, T)
+    L = Layout(COL * S, 0, T)
     ops = L.ops
     master = [None]
 
@@ -588,11 +586,6 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
 
     def media_block(items, x, y, w, corners, in_quote):
         boxes, h = media_boxes(items, x, y, w, corners)
-        if media_h and h > media_h:
-            k = media_h / h
-            nx = x + (w - w * k) / 2
-            boxes = [(it, nx + (bx - x) * k, y + (by - y) * k, bw * k, bh * k, fit) for it, bx, by, bw, bh, fit in boxes]
-            x, w, h = nx, w * k, media_h
         radius = 16
         for it, bx, by, bw, bh, fit in boxes:
             single = len(boxes) == 1
@@ -657,7 +650,7 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         return y - top
 
     y = PAD
-    x0, cw = PAD + AVATAR + GAP, col - PAD - AVATAR - GAP - PAD
+    x0, cw = PAD + AVATAR + GAP, COL - PAD - AVATAR - GAP - PAD
     ops.append(("avatar", post["avatar"], px(PAD), px(y), px(AVATAR)))
     # header line
     badge = 20 if post["verified"] else 0
