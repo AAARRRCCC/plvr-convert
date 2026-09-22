@@ -240,15 +240,22 @@ def _lead(post: dict) -> dict | None:
     return next((m for m in vids if m["kind"] == "video"), vids[0] if vids else None)
 
 
-def _plain(post: dict) -> str:
-    """A plain embed: name, text, and the video as x.com serves it."""
-    e = lambda s: html.escape(str(s), quote=True)
-    v = _lead(post)
-    title = f"{post['name']} (@{post['handle']})"
+def _text(post: dict) -> str:
     text = tweet.plain_text(post)
     q = post.get("quote")
     if q:
         text += f"\n\n↘️ Quoting {q['name']} (@{q['handle']})\n{tweet.plain_text(q)}"
+    return text
+
+
+def _plain(req: Request, post: dict) -> str:
+    """A plain embed: name, text, and the video as x.com serves it. Discord
+    shows no description on an embed with a video, so the text also goes in
+    the oEmbed author name, which it does show."""
+    e = lambda s: html.escape(str(s), quote=True)
+    v = _lead(post)
+    title = f"{post['name']} (@{post['handle']})"
+    text = _text(post)
     tags = [
         ("og:title", title), ("og:description", text[:1000]), ("og:url", post["url"]), ("og:type", "video.other"),
         ("og:video", v["url"]), ("og:video:secure_url", v["url"]), ("og:video:type", "video/mp4"),
@@ -262,6 +269,7 @@ def _plain(post: dict) -> str:
 <title>{e(title)}</title>
 <meta name="theme-color" content="#000000">
 <meta name="twitter:card" content="player">
+<link rel="alternate" type="application/json+oembed" href="{e(_base(req))}/o/{e(post['id'])}.json">
 {head}
 <meta http-equiv="refresh" content="0; url={e(post['url'])}">
 </head><body></body></html>"""
@@ -275,6 +283,22 @@ def _to_x(req: Request) -> RedirectResponse:
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "version": VERSION, "rendering": len(_jobs)}
+
+
+@app.get("/o/{name}")
+async def oembed(name: str):
+    m = re.fullmatch(r"(\d{1,20})\.json", name)
+    if not m:
+        return Response(status_code=404)
+    try:
+        post = await tweet.fetch(m.group(1), DEPTH)
+    except rs.ResolveError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    text = _text(post)
+    # Discord cuts an author name at 256 characters
+    if len(text) > 256:
+        text = text[:255].rstrip() + "…"
+    return {"version": "1.0", "type": "link", "author_name": text, "author_url": post["url"]}
 
 
 @app.get("/m/{name}")
@@ -309,7 +333,7 @@ async def post(path: str, req: Request):
             post_ = await tweet.fetch(tid, DEPTH)
             lead = _lead(post_)
             if lead and (lead.get("duration") or 0) > LONG_VIDEO:
-                return HTMLResponse(_plain(post_))
+                return HTMLResponse(_plain(req, post_))
             # the tags need only the size, so they go out while the render
             # runs and the file requests that follow wait on it; only Discord's
             # video redirect has to wait here
@@ -318,7 +342,7 @@ async def post(path: str, req: Request):
             if discord and meta["ext"] == "mp4":
                 done, _ = await asyncio.wait({job}, timeout=DISCORD_WAIT)
                 if not done:
-                    return HTMLResponse(_plain(post_))
+                    return HTMLResponse(_plain(req, post_))
                 meta = job.result()
     except Busy:
         return _to_x(req)
