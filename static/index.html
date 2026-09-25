@@ -36,7 +36,7 @@ button,input,select{font:inherit;color:inherit}
 /* ---------- windows, as on the home page ---------- */
 .scene{position:relative;flex:1;display:grid;place-items:center;padding:24px 20px 80px}
 .win{background:var(--win);border:2px solid var(--line);border-radius:14px;box-shadow:0 6px 0 var(--shadow);display:flex;flex-direction:column;overflow:hidden;transition:box-shadow .2s,transform .2s ease-out,opacity .2s}
-.win.home{width:min(760px,100%);min-height:min(440px,72vh);z-index:1}
+.win.home{width:min(760px,100%);z-index:1}
 .win.pop{position:absolute;width:min(560px,calc(100vw - 32px));z-index:5}
 .win.pop.wide{width:min(660px,calc(100vw - 32px))}
 .win.focus{box-shadow:0 9px 0 var(--shadow-hover)}
@@ -62,10 +62,8 @@ button,input,select{font:inherit;color:inherit}
 code{font-family:var(--font-mono);font-size:.85em;background:var(--paper-2);padding:1px 5px;border-radius:5px}
 
 /* ---------- home ---------- */
-.home .body{flex:1;max-height:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;text-align:center;padding:34px 24px 30px}
-.hero h1{margin:0;font-size:clamp(38px,6.5vw,58px);font-weight:500;line-height:1.05;letter-spacing:-.01em}
-.hero h1 b{font-weight:800;color:var(--accent)}
-.hero p{margin:10px auto 0;color:var(--ink-2);font-size:clamp(15px,2.1vw,18px);text-wrap:balance;max-width:46ch}
+.home .body{flex:1;max-height:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;padding:30px 24px 22px}
+.tagline{margin:4px 0 0;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--ink-2);text-wrap:balance}
 
 .paste{display:flex;gap:8px;width:min(600px,100%);align-items:stretch}
 .paste .field{flex:1;display:flex;align-items:center;gap:6px;border:2px solid var(--line);border-radius:14px;background:var(--win);box-shadow:inset 0 3px 0 var(--tag-shadow);padding:0 6px 0 14px;transition:border-color .15s,box-shadow .15s}
@@ -144,6 +142,16 @@ details.clip .opts{margin:8px 0 0}
 .pick.busy{opacity:.55;pointer-events:none}
 .pick.done{border-color:var(--pub)}
 
+/* remux */
+.pickfile{width:100%;min-height:150px;border:2px dashed var(--line);border-radius:14px;background:var(--paper-2);font-family:var(--font-mono);font-weight:600;font-size:15px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:background-color .15s,border-color .15s}
+.pickfile:hover{background:var(--wave-2);border-color:var(--wave)}
+.pickfile[hidden]{display:none}
+.pickfile svg{width:30px;height:30px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+video.thumb{pointer-events:none}
+.meter{height:6px;border-radius:3px;background:var(--paper-2);overflow:hidden;margin-top:12px}
+.meter[hidden]{display:none}
+.meter i{display:block;height:100%;width:0;background:var(--wave);transition:width .2s}
+
 /* ---------- settings ---------- */
 .set{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
 .tog{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding:7px 0;font-size:14px}
@@ -186,7 +194,7 @@ body.dropping .drop{display:grid}
   body{overflow:auto}
   .scene{padding:70px 14px 90px;align-items:start}
   .win.home{min-height:0}
-  .home .body{padding:26px 16px 24px;gap:22px}
+  .home .body{padding:22px 16px 20px;gap:20px}
   .paste{flex-wrap:wrap}.paste .go{width:100%;padding:12px}
   .menu{gap:10px}.menu button,.menu a{width:calc(50% - 5px);max-width:150px}
   .win.pop{position:fixed;inset:68px 12px 74px;width:auto;max-height:none;z-index:30}
@@ -223,13 +231,9 @@ body.dropping .drop{display:grid}
   <section class="win home focus" id="w-home" aria-labelledby="t-home">
     <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-home">convert</span></div>
     <div class="body">
-      <div class="hero">
-        <h1>paste a <b>link</b>.</h1>
-        <p>fully local hosted by me! nothing is ever kept!<br>fully sponsored and paid for by ArcCORP</p>
-      </div>
       <form class="paste" id="form" autocomplete="off">
         <div class="field">
-          <input id="url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocapitalize="off" aria-label="link">
+          <input id="url" type="url" inputmode="url" placeholder="link goes here :D" spellcheck="false" autocapitalize="off" aria-label="link">
           <button class="ib" type="button" id="clear" title="clear" aria-label="clear" hidden><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
           <button class="ib" type="button" id="paste" title="paste from clipboard" aria-label="paste from clipboard"><svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg></button>
         </div>
@@ -244,6 +248,10 @@ body.dropping .drop{display:grid}
       </div>
       <div class="hint" id="hint"></div>
       <nav class="menu" aria-label="pages">
+        <button data-open="remux">
+          <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+          <span>remux</span>
+        </button>
         <button data-open="settings">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>settings</span>
@@ -261,6 +269,7 @@ body.dropping .drop{display:grid}
           <span>convert this</span>
         </a>
       </nav>
+      <p class="tagline">fully local hosted by me! nothing is ever kept!<br>fully sponsored and paid for by ArcCORP</p>
     </div>
   </section>
 
@@ -328,10 +337,40 @@ body.dropping .drop{display:grid}
     </div>
   </section>
 
+  <!-- remux: your own file, converted in the browser -->
+  <section class="win pop wide" id="w-remux" aria-labelledby="t-remux" hidden>
+    <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-remux">remux</span><button class="close" aria-label="close">×</button></div>
+    <div class="body">
+      <button class="pickfile" id="rx-pick" type="button"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>pick a file</button>
+      <input type="file" id="rx-file" accept="video/*,audio/*,.mkv,.mov,.m4v,.ts,.flac,.opus" hidden>
+      <div id="rx-work" hidden>
+        <div class="card">
+          <video class="thumb" id="rx-thumb" muted playsinline preload="metadata" aria-hidden="true"></video>
+          <div><input class="result-name" id="rx-name" aria-label="filename" maxlength="154"><small id="rx-meta"></small><span class="host">your file</span></div>
+        </div>
+        <div class="opts">
+          <div class="opt"><label for="rx-to">to</label><select id="rx-to"><option value="mp4">mp4</option><option value="muted">muted mp4</option><option value="mkv">mkv</option><option value="webm">webm</option><option value="gif">gif</option><option value="mp3">mp3</option><option value="m4a">m4a</option><option value="opus">opus</option><option value="wav">wav</option></select></div>
+          <div class="opt" data-for="gif"><label for="rx-gif_width">width</label><select id="rx-gif_width"><option value="320">320 px</option><option value="480">480 px</option><option value="640">640 px</option><option value="800">800 px</option></select></div>
+          <div class="opt" data-for="gif"><label for="rx-gif_fps">frame rate</label><select id="rx-gif_fps"><option value="8">8 fps</option><option value="12">12 fps</option><option value="15">15 fps</option><option value="20">20 fps</option><option value="25">25 fps</option></select></div>
+          <div class="opt" data-for="mp3 m4a opus"><label for="rx-abitrate">bitrate</label><select id="rx-abitrate"><option value="320">320 kbps</option><option value="256">256 kbps</option><option value="192">192 kbps</option><option value="128">128 kbps</option><option value="96">96 kbps</option><option value="64">64 kbps</option></select></div>
+        </div>
+        <details class="clip"><summary>just a part of it</summary>
+          <div class="opts"><div class="opt"><label for="rx-start">from</label><input id="rx-start" placeholder="0:00" inputmode="numeric"></div><div class="opt"><label for="rx-end">to</label><input id="rx-end" placeholder="end" inputmode="numeric"></div></div>
+        </details>
+        <div class="dl">
+          <button class="big" id="rx-go" disabled><svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span>convert</span></button>
+          <button class="sm" id="rx-other">another file</button>
+        </div>
+        <div class="meter" id="rx-meter" hidden><i id="rx-fill"></i></div>
+        <div class="plan" id="rx-plan"></div>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <iframe id="sink" hidden title="download"></iframe>
-<div class="river">the water is procedural, driven by the live james river gauge</div>
+<div class="river">background from USGS live data</div>
 <div class="copy">© 2026 arc · <a href="https://plvr.net">plvr.net</a></div>
 <div class="toast" id="toast" role="status"></div>
 
@@ -453,7 +492,8 @@ body.dropping .drop{display:grid}
   const fmtDur = s => { if(s == null) return null; s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60; return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
   const fmtSize = b => b ? (b > 1e9 ? (b/1e9).toFixed(2) + ' GB' : b > 1e6 ? (b/1e6).toFixed(1) + ' MB' : Math.round(b/1e3) + ' KB') : null;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const siteName = e => ({youtube:'youtube', twitter:'x', tiktok:'tiktok', instagram:'instagram', reddit:'reddit', twitch:'twitch', vimeo:'vimeo', soundcloud:'soundcloud', bluesky:'bluesky', facebook:'facebook', bilibili:'bilibili', generic:'the web'}[e] || e);
+  Object.assign(window.plvr, {settings, fmtDur, fmtSize, parseTime});
+  const siteName = e =>({youtube:'youtube', twitter:'x', tiktok:'tiktok', instagram:'instagram', reddit:'reddit', twitch:'twitch', vimeo:'vimeo', soundcloud:'soundcloud', bluesky:'bluesky', facebook:'facebook', bilibili:'bilibili', generic:'the web'}[e] || e);
 
   /* ---- mode chips + hint ---- */
   const chips = $$('#modes .chip');
@@ -487,15 +527,22 @@ body.dropping .drop{display:grid}
   };
   const looksLikeUrl = s => /^https?:\/\/\S+$/i.test(s.trim());
   document.addEventListener('paste', e => {
+    const cd = e.clipboardData || window.clipboardData;
+    if(cd.files && cd.files.length){ e.preventDefault(); window.plvr.remux(cd.files[0]); return; }
     if(e.target === url || e.target.closest('input,select,textarea')) return;
-    const t = (e.clipboardData || window.clipboardData).getData('text').trim();
+    const t = cd.getData('text').trim();
     if(looksLikeUrl(t)){ e.preventDefault(); url.value = t; clear.hidden = false; submit(); }
   });
   let dragDepth = 0;
-  document.addEventListener('dragenter', e => { if([...e.dataTransfer.types].some(t => t === 'text/uri-list' || t === 'text/plain')){ dragDepth++; document.body.classList.add('dropping'); } });
+  const dropBox = $('.drop');
+  document.addEventListener('dragenter', e => { const ty = [...e.dataTransfer.types], files = ty.includes('Files'); if(files || ty.some(t => t === 'text/uri-list' || t === 'text/plain')){ dragDepth++; dropBox.textContent = files ? 'drop the file' : 'drop the link'; document.body.classList.add('dropping'); } });
   document.addEventListener('dragleave', () => { if(--dragDepth <= 0){ dragDepth = 0; document.body.classList.remove('dropping'); } });
   document.addEventListener('dragover', e => e.preventDefault());
-  document.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping'); const t = (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text')).split('\n')[0].trim(); if(looksLikeUrl(t)){ url.value = t; clear.hidden = false; submit(); } });
+  document.addEventListener('drop', e => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
+    if(e.dataTransfer.files && e.dataTransfer.files.length){ window.plvr.remux(e.dataTransfer.files[0]); return; }
+    const t = (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text')).split('\n')[0].trim(); if(looksLikeUrl(t)){ url.value = t; clear.hidden = false; submit(); }
+  });
   form.addEventListener('submit', e => { e.preventDefault(); submit(); });
 
   /* ---- talk to the api ---- */
@@ -702,6 +749,214 @@ body.dropping .drop{display:grid}
   const q = new URLSearchParams(location.search).get('url') || (location.hash.startsWith('#http') ? location.hash.slice(1) : '');
   if(q){ url.value = q; clear.hidden = false; history.replaceState(null, '', location.pathname); submit(); }
   else if(!mobile()) url.focus();
+})();
+
+/* ===================== remux: your own file, converted by ffmpeg.wasm on your device ===================== */
+(() => {
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const { blip, say, open, settings: S, fmtDur, fmtSize, parseTime } = window.plvr;
+  const FFMPEG = '/vendor/ffmpeg-0.12.15/index.js', CORE = '/vendor/core-0.12.10/ffmpeg-core.js', WASM = '/vendor/core-0.12.10/ffmpeg-core.wasm', WASM_SIZE = 32232419;
+  const IN = '/in/', MIME = {mp4:'video/mp4', mkv:'video/x-matroska', webm:'video/webm', gif:'image/gif', mp3:'audio/mpeg', m4a:'audio/mp4', opus:'audio/ogg', wav:'audio/wav'};
+  const EXT = {mp4:'mp4', muted:'mp4', mkv:'mkv', webm:'webm', gif:'gif', mp3:'mp3', m4a:'m4a', opus:'opus', wav:'wav'};
+  const AUDIO = ['mp3', 'm4a', 'opus', 'wav'];
+  const pick = $('#rx-pick'), input = $('#rx-file'), work = $('#rx-work'), thumb = $('#rx-thumb'), nameEl = $('#rx-name'), meta = $('#rx-meta'),
+        to = $('#rx-to'), gw = $('#rx-gif_width'), gf = $('#rx-gif_fps'), br = $('#rx-abitrate'), start = $('#rx-start'), end = $('#rx-end'),
+        go = $('#rx-go'), goLabel = $('#rx-go span'), other = $('#rx-other'), plan = $('#rx-plan'), meter = $('#rx-meter'), fill = $('#rx-fill');
+
+  let ff = null, wasmURL = null, mounted = false, onLog = null, log = [];
+  let file = null, inFile = null, stem = 'file', curExt = null, info = null, ready = null, out = null, thumbURL = null, busy = false, seq = 0;
+
+  function status(msg, frac, err){
+    plan.textContent = msg; plan.classList.toggle('err', !!err);
+    meter.hidden = frac == null; if(frac != null) fill.style.width = Math.round(Math.min(1, frac)*100) + '%';
+  }
+
+  /* the 32 MB core is fetched here rather than by the worker, so its progress can be shown; the http cache keeps it */
+  async function loadFF(){
+    if(ff) return ff;
+    const { FFmpeg } = await import(FFMPEG);
+    if(!wasmURL){
+      const r = await fetch(WASM);
+      if(!r.ok) throw new Error('couldn\'t load ffmpeg (' + r.status + ')');
+      const total = r.headers.get('content-encoding') ? WASM_SIZE : (+r.headers.get('content-length') || WASM_SIZE), reader = r.body.getReader(), parts = [];
+      for(let got = 0;;){
+        const { done, value } = await reader.read(); if(done) break;
+        parts.push(value); got += value.length;
+        status(`loading ffmpeg · ${Math.round(got/1e6)} / ${Math.round(total/1e6)} MB`, got/total);
+      }
+      wasmURL = URL.createObjectURL(new Blob(parts, {type:'application/wasm'}));
+    }
+    status('starting ffmpeg…');
+    const f = new FFmpeg();
+    f.on('log', ({ message }) => { log.push(message); if(log.length > 400) log.splice(0, 200); if(onLog) onLog(message); });
+    await f.load({coreURL: new URL(CORE, location.href).href, wasmURL});
+    ff = f; mounted = false;
+    return f;
+  }
+
+  /* the file is mounted, not copied: ffmpeg reads it straight from disk through the browser */
+  async function prepare(){
+    const f = await loadFF();
+    if(mounted){ await f.unmount('/in').catch(() => {}); }
+    else await f.createDir('/in').catch(() => {});
+    await f.mount('WORKERFS', {files:[inFile]}, '/in'); mounted = true;
+    log = []; await f.exec(['-hide_banner', '-i', IN + inFile.name]);
+    const txt = log.join('\n'), d = txt.match(/Duration: (\d+):(\d+):([\d.]+)/);
+    const v = [...txt.matchAll(/Stream #\d+:\d+[^:]*: Video: (\w+)(.*)/g)].find(m => !/attached pic/.test(m[2]));
+    const a = txt.match(/Stream #\d+:\d+[^:]*: Audio: (\w+)/);
+    if(!v && !a) throw new Error('ffmpeg found no video or audio in that file');
+    info = {dur: d ? +d[1]*3600 + +d[2]*60 + +d[3] : null, v: v ? v[1] : null, a: a ? a[1] : null};
+    return f;
+  }
+
+  /* what to run: the first command copies whatever the container can take, the second re-encodes everything */
+  function build(){
+    const t = to.value, ext = EXT[t], OUT = '/out.' + ext;
+    const s = parseTime(start.value), e = parseTime(end.value), from = s || 0;
+    let len = e != null && e > from ? e - from : null, capped = false;
+    if(t === 'gif' && len == null && (info.dur || 0) - from > 60){ len = 30; capped = true; }
+    const pre = s ? ['-ss', s.toFixed(3)] : [], dur = len != null ? ['-t', len.toFixed(3)] : [];
+    const src = [...pre, '-i', IN + inFile.name], expect = len ?? Math.max(0, (info.dur || 0) - from), b = br.value + 'k';
+    if(t === 'gif'){
+      const w = gw.value, fps = gf.value;
+      const vf = `fps=${fps},scale='min(${w},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`;
+      return {ext, OUT, expect, tries: [[...src, '-map', '0:v:0', '-an', '-vf', vf, ...dur, OUT]], label: `gif · ${w}px · ${fps}fps${capped ? ' · first 30s' : ''}`};
+    }
+    if(AUDIO.includes(t)){
+      const same = {mp3:'mp3', m4a:'aac', opus:'opus'}[t] === info.a;
+      const enc = {mp3:['-c:a', 'libmp3lame', '-b:a', b], m4a:['-c:a', 'aac', '-b:a', b], opus:['-c:a', 'libopus', '-b:a', b], wav:['-c:a', 'pcm_s16le']}[t];
+      const base = [...src, '-map', '0:a:0', '-vn'], mux = t === 'm4a' ? ['-movflags', '+faststart'] : [];
+      const tries = [[...base, ...enc, ...dur, ...mux, OUT]];
+      if(same) tries.unshift([...base, '-c:a', 'copy', ...dur, ...mux, OUT]);
+      return {ext, OUT, expect, tries, label: `${t} · ${same ? 'copied' : 'converted'}`};
+    }
+    const box = ext, mute = t === 'muted' || !info.a;
+    const vok = box === 'mkv' || (box === 'mp4' ? ['h264', 'hevc'] : ['vp8', 'vp9', 'av1']).includes(info.v);
+    const aok = box === 'mkv' || (box === 'mp4' ? ['aac', 'mp3', 'ac3', 'eac3'] : ['opus', 'vorbis']).includes(info.a);
+    const venc = box === 'webm' ? ['-c:v', 'libvpx', '-deadline', 'realtime', '-cpu-used', '8', '-b:v', '2M'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'];
+    const aenc = box === 'webm' ? ['-c:a', 'libopus', '-b:a', '128k'] : ['-c:a', 'aac', '-b:a', '192k'];
+    const maps = ['-map', '0:v:0', ...(mute ? ['-an'] : ['-map', '0:a:0'])], mux = box === 'mp4' ? ['-movflags', '+faststart'] : [];
+    const vcopy = ['-c:v', 'copy', ...(box === 'mp4' && info.v === 'hevc' ? ['-tag:v', 'hvc1'] : [])];
+    const full = [...src, ...maps, ...venc, ...(mute ? [] : aenc), ...dur, ...mux, OUT];
+    const tries = [full];
+    if(vok || (aok && !mute)) tries.unshift([...src, ...maps, ...(vok ? vcopy : venc), ...(mute ? [] : aok ? ['-c:a', 'copy'] : aenc), ...dur, ...mux, OUT]);
+    const how = !vok ? 're-encoded' : mute || aok ? 'copied' : 'audio converted';
+    return {ext, OUT, expect, tries, label: `${box}${t === 'muted' ? ' · no audio' : ''} · ${how}`};
+  }
+
+  const lastError = () => {
+    const bad = log.filter(l => /error|invalid|not supported|could not|unable|no such|does not/i.test(l) && !/^\s*(frame|size)=/.test(l));
+    return bad.length ? 'ffmpeg: ' + bad[bad.length - 1].trim().slice(0, 180) : 'ffmpeg couldn\'t convert that';
+  };
+
+  function idle(){
+    busy = false; goLabel.textContent = out ? 'download' : 'convert';
+    go.disabled = !info;
+  }
+  function stale(){
+    if(out){ URL.revokeObjectURL(out); out = null; }
+    if(!busy){ idle(); if(info) status(build().label + ' · on your device'); }
+  }
+  function paintOpts(){
+    $$('#w-remux .opt[data-for]').forEach(o => o.hidden = !o.dataset.for.split(' ').includes(to.value));
+    for(const o of to.options) o.disabled = !!info && (AUDIO.includes(o.value) ? !info.a : !info.v);
+    const ext = EXT[to.value], v = nameEl.value.trim();
+    const n = curExt && v.toLowerCase().endsWith('.' + curExt) ? v.slice(0, -(curExt.length + 1)) : v;
+    nameEl.value = (n || stem) + '.' + ext; curExt = ext;
+  }
+
+  async function convert(){
+    if(busy) return stop();
+    if(out) return save();
+    const my = ++seq;
+    busy = true; goLabel.textContent = 'stop'; blip('click');
+    try{
+      const f = await (ready ||= prepare());
+      if(my !== seq) return;
+      const p = build();
+      let ok = false;
+      for(const args of p.tries){
+        log = []; status(p.label + ' · starting…', 0);
+        onLog = m => { const t = m.match(/time=(\d+):(\d+):([\d.]+)/); if(t && p.expect) status(`${p.label} · ${Math.min(99, Math.round((+t[1]*3600 + +t[2]*60 + +t[3])/p.expect*100))}%`, (+t[1]*3600 + +t[2]*60 + +t[3])/p.expect); };
+        const code = await f.exec(args);
+        onLog = null;
+        if(my !== seq) return;
+        if(code === 0){ ok = true; break; }
+        await f.deleteFile(p.OUT).catch(() => {});
+      }
+      if(!ok) throw new Error(lastError());
+      const data = await f.readFile(p.OUT);
+      await f.deleteFile(p.OUT).catch(() => {});
+      if(my !== seq) return;
+      out = URL.createObjectURL(new Blob([data], {type: MIME[p.ext]}));
+      status(`${p.label} · ${fmtSize(data.length) || '0 KB'} · done`);
+      blip('done'); idle(); save();
+    }catch(e){
+      onLog = null;
+      if(my !== seq) return;
+      const msg = String(e && e.message || e);
+      status(/abort|memory/i.test(msg) ? 'ran out of memory. try a shorter part of it' : msg, null, true); blip('err');
+      if(/abort|memory|terminate/i.test(msg)) reset();
+      idle();
+    }
+  }
+
+  function save(){
+    if(!out) return;
+    const a = document.createElement('a');
+    a.href = out; a.download = nameEl.value.trim() || stem + '.' + EXT[to.value];
+    document.body.append(a); a.click(); a.remove();
+    say('saved');
+  }
+
+  /* a stuck or unwanted run: throw the worker away; the next run starts a fresh one from the cached core */
+  function reset(){ if(ff){ try{ ff.terminate(); }catch(e){} } ff = null; mounted = false; ready = null; onLog = null; }
+  function stop(){ seq++; reset(); busy = false; blip('close'); status('stopped'); idle(); }
+
+  function setFile(f){
+    if(!f) return;
+    open('remux');
+    if(busy) stop();
+    seq++; file = f; info = null; stale();
+    const ext = ((f.name.match(/\.([a-z0-9]{1,5})$/i) || [])[1] || 'bin').toLowerCase();
+    inFile = new File([f], 'in.' + ext, {type: f.type});
+    stem = f.name.replace(/\.[^.]*$/, '').trim() || 'file';
+    if(thumbURL) URL.revokeObjectURL(thumbURL);
+    thumbURL = URL.createObjectURL(f); thumb.src = thumbURL + '#t=0.5';
+    thumb.classList.toggle('sq', /^audio\//.test(f.type));
+    pick.hidden = true; work.hidden = false;
+    meta.textContent = fmtSize(f.size) || '';
+    const m = S.mode;
+    to.value = m === 'gif' ? 'gif' : m === 'mute' ? 'muted' : m === 'audio' ? (AUDIO.includes(S.aformat) ? S.aformat : 'mp3') : 'mp4';
+    gw.value = String(S.gif_width); gf.value = String(S.gif_fps); br.value = String(S.abitrate);
+    start.value = end.value = ''; end.placeholder = 'end';
+    nameEl.value = stem; curExt = null; paintOpts();
+    go.disabled = true; goLabel.textContent = 'convert';
+    const my = seq;
+    ready = (ready || Promise.resolve()).catch(() => {}).then(() => my === seq ? prepare() : ff);
+    ready.then(() => {
+      if(my !== seq) return;
+      meta.textContent = [info.v, info.a, fmtDur(info.dur), fmtSize(f.size)].filter(Boolean).join(' · ');
+      if(info.dur) end.placeholder = fmtDur(info.dur);
+      if(to.selectedOptions[0].disabled) to.value = info.v ? 'mp4' : 'mp3';
+      paintOpts(); idle(); status(build().label + ' · on your device');
+    }).catch(e => { if(my !== seq) return; ready = null; status(String(e && e.message || e), null, true); blip('err'); });
+  }
+  window.plvr.remux = setFile;
+
+  pick.onclick = () => { blip('click'); input.click(); };
+  input.onchange = () => { setFile(input.files[0]); input.value = ''; };
+  other.onclick = () => {
+    blip('click'); if(busy) stop();
+    seq++; file = info = null; stale();
+    if(thumbURL){ URL.revokeObjectURL(thumbURL); thumbURL = null; } thumb.removeAttribute('src');
+    work.hidden = true; pick.hidden = false; status(''); input.click();
+  };
+  go.onclick = convert;
+  to.onchange = () => { blip('click'); paintOpts(); stale(); };
+  [gw, gf, br].forEach(el => el.onchange = () => { blip('click'); stale(); });
+  [start, end].forEach(el => el.onchange = stale);
+  nameEl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); nameEl.blur(); } });
 })();
 
 /* ===================== the river: the James at Richmond, as on the home page ===================== */

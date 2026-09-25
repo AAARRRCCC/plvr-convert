@@ -266,4 +266,14 @@ async def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
 
+@app.middleware("http")
+async def vendor_cache(req: Request, call_next):
+    # the vendored ffmpeg.wasm lives under versioned paths, so a browser keeps
+    # the 32 MB core for good instead of fetching it each visit
+    res = await call_next(req)
+    if req.url.path.startswith("/vendor/") and res.status_code == 200:
+        res.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return res
+
+
 app.mount("/", StaticFiles(directory=STATIC), name="static")

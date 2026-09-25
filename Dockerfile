@@ -26,6 +26,9 @@ RUN apt-get update \
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# ffmpeg.wasm for the remux window, which converts uploads in the browser
+COPY tools/vendor_ffmpeg.py ./tools/
+RUN python tools/vendor_ffmpeg.py /srv/static/vendor
 COPY app ./app
 COPY static ./static
 

@@ -15,6 +15,9 @@ disk and nothing is kept.
   a quote has a video, png otherwise. Quote depth 0-3.
 - **filename styles** like cobalt's: pretty, basic, classic, nerdy.
 - multi-item posts (carousels, threads) show a picker.
+- **remux**: your own file (pick, drop or paste it) to mp4, mkv, webm, gif,
+  mp3, m4a, opus or wav. It runs in the browser on ffmpeg.wasm, so the file
+  never reaches the server; streams are copied when the container takes them.
 
 ## The embed host
 
@@ -31,6 +34,7 @@ Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
 
 ```sh
 pip install -r requirements.txt   # needs ffmpeg on PATH, deno for YouTube, fonts for screenshots (see Dockerfile)
+python tools/vendor_ffmpeg.py     # ffmpeg.wasm for remux, into static/vendor (the image build does this itself)
 uvicorn app.main:app --port 8080
 ```
 
