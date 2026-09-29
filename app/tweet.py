@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from . import resolve as rs
+from .flags import LANGS
 
 log = logging.getLogger("convert.tweet")
 
@@ -77,7 +78,7 @@ async def fetch(tid: str, depth: int, lang: str | None = None) -> dict:
     if hit is not None:
         return hit
     t0 = time.time()
-    raw = await _fetch_raw(tid, lang)
+    raw = await _translated(await _fetch_raw(tid, lang), lang)
     post = _normalize(raw)
     cur, q, d = post, raw.get("quote"), depth
     while d > 0 and q:
@@ -87,11 +88,32 @@ async def fetch(tid: str, depth: int, lang: str | None = None) -> dict:
                 q = await _fetch_raw(str(q.get("id")), lang)
             except rs.ResolveError:
                 pass
+        q = await _translated(q, lang)
         cur["quote"] = _normalize(q)
         cur, q, d = cur["quote"], q.get("quote"), d - 1
     log.info("tweet %s depth %d%s %.1fs", tid, depth, f" {lang}" if lang else "", time.time() - t0)
     rs._put(key, post)
     return post
+
+
+_LANG_NAMES: dict[str, str] = {}
+for _name, _code in LANGS.items():
+    _LANG_NAMES.setdefault(_code, _name.title())
+
+
+async def _translated(raw: dict, lang: str | None) -> dict:
+    """The post with its translation. fxtwitter can answer before a post's
+    translation (a quote's, most often) is ready, so one without is asked for
+    again on its own; one already in the language never gets one."""
+    if not lang or raw.get("translation") or not (raw.get("text") or "").strip() or not raw.get("id"):
+        return raw
+    try:
+        again = await _fetch_raw(str(raw["id"]), lang)
+    except rs.ResolveError:
+        return raw
+    if again.get("translation"):
+        raw = dict(raw, translation=again["translation"])
+    return raw
 
 
 # ------------------------------------------------------------ normalizing ---
@@ -196,7 +218,8 @@ def _normalize(raw: dict) -> dict:
     if tr.get("text") and tr.get("source_lang") != tr.get("target_lang"):
         # the translation is plain text: its links and mentions aren't marked
         spans = [{"text": html.unescape(tr["text"]).strip(), "link": False}]
-        translated = tr.get("source_lang_en") or tr.get("source_lang") or "another language"
+        code = str(tr.get("source_lang") or "").lower()
+        translated = tr.get("source_lang_en") or _LANG_NAMES.get(code.split("-")[0]) or code or "another language"
     return {
         "id": str(raw.get("id") or ""),
         "url": raw.get("url") or f"https://x.com/i/status/{raw.get('id')}",
