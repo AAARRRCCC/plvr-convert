@@ -12,6 +12,7 @@ flag with a value it can't read.
     q            quote depth 0-3 (default 1)
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
+    media        the media alone, stacked edge to edge: no name, text or stats
     lines        cut the text after this many lines, with "Show more"
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
     plain        a video post goes out as x.com's own file, not the render
@@ -36,7 +37,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -49,6 +50,7 @@ class Flags:
     stats: bool = True
     theme: str = "dark"
     lines: int | None = None
+    media: bool = False
     start: float = 0.0
     end: float | None = None
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
@@ -72,6 +74,8 @@ class Flags:
             q.append(("theme", self.theme))
         if self.lines is not None:
             q.append(("lines", self.lines))
+        if self.media:
+            q.append(("media", 1))
         if self.start:
             q.append(("start", _num(self.start)))
         if self.end is not None:
@@ -122,7 +126,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "raw", "cancel") and _bool(v) is not None:
+        elif k in ("stats", "plain", "raw", "cancel", "media") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

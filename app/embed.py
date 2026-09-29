@@ -165,7 +165,7 @@ async def _post(tid: str, f: flags.Flags) -> dict:
 
 
 def _make(post: dict, f: flags.Flags) -> shot.Shot:
-    return shot.make(post, dict(planning.DEFAULTS, mode="shot", shot_stats=f.stats), f.lines or FULL, f.theme, f.start, f.end)
+    return shot.make(post, dict(planning.DEFAULTS, mode="shot", shot_stats=f.stats), f.lines or FULL, f.theme, f.start, f.end, f.media)
 
 
 async def _render(tid: str, f: flags.Flags) -> dict:
@@ -457,7 +457,7 @@ async def post(path: str, req: Request):
             lead = _lead(post_)
             if lead and (f.plain or _length(lead, f) > LONG_VIDEO):
                 # too long to render: x.com's own file, or a plain embed of it
-                if f.raw:
+                if f.raw or f.media and discord:
                     return RedirectResponse(lead["url"], status_code=302)
                 return HTMLResponse(_plain(req, post_, f.query()))
         if meta is None:
@@ -484,7 +484,7 @@ async def _layout_ext(tid: str, f: flags.Flags) -> str:
 
 def _pending(tid: str, post: dict, f: flags.Flags) -> dict:
     """What the tags need while the render is still running."""
-    return _describe(tid, post, card.layout(post, f.theme, f.stats, max_lines=f.lines or FULL), f)
+    return _describe(tid, post, card.layout(post, f.theme, f.stats, max_lines=f.lines or FULL, media_only=f.media), f)
 
 
 def _describe(tid: str, post: dict, L: card.Layout, f: flags.Flags) -> dict:

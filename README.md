@@ -38,6 +38,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |
 | `lines` | a number | cut the text there, with "Show more" |
+| `media` | | the media alone, stacked edge to edge: no name, text or stats (a long video goes to Discord as x.com's file) |
 | `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a clip under `LONG_VIDEO` renders even from a long one |
 | `plain` | | a video post goes out as x.com's own file |
 | `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |

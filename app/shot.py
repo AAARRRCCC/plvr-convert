@@ -54,10 +54,10 @@ def describe(post: dict) -> dict:
 
 
 def make(post: dict, o: dict, max_lines: int = card.MAX_LINES, theme: str = "dark",
-         start: float = 0.0, end: float | None = None) -> Shot:
+         start: float = 0.0, end: float | None = None, media_only: bool = False) -> Shot:
     """The layout and plan; `start` and `end` clip the lead video, whose
     length the whole render takes."""
-    L = card.layout(post, theme, o["shot_stats"], max_lines=max_lines)
+    L = card.layout(post, theme, o["shot_stats"], max_lines=max_lines, media_only=media_only)
     info = {"title": tweet.plain_text(post)[:80] or post["handle"], "id": post["id"], "extractor_key": "twitter"}
     size = f"{L.width}×{L.height}"
     if L.cells:

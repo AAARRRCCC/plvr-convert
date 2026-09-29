@@ -575,7 +575,10 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
             (items[2], x, y + hh + gap, hw, hh, "cover"), (items[3], x + hw + gap, y + hh + gap, hw, hh, "cover")], h
 
 
-def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES) -> Layout:
+def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES,
+           media_only: bool = False) -> Layout:
+    """With `media_only`, the media of the post and each quote it shows,
+    stacked edge to edge with nothing else; a post without media is drawn whole."""
     T = THEMES.get(theme, THEMES["dark"])
     L = Layout(COL * S, 0, T)
     ops = L.ops
@@ -583,9 +586,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     def px(v):
         return int(round(v * S))
 
-    def media_block(items, x, y, w, corners, in_quote):
+    def media_block(items, x, y, w, corners, in_quote, bare=False):
         boxes, h = media_boxes(items, x, y, w, corners)
-        radius = 16
+        radius = 0 if bare else 16
         for it, bx, by, bw, bh, fit in boxes:
             single = len(boxes) == 1
             if single:
@@ -602,8 +605,23 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
                     L.cells.append(Cell(px(bx), px(by), px(bw), px(bh), fit, it, px(radius), cr))
                 ops.append(("poster", it.get("poster"), px(bx), px(by), px(bw), px(bh), px(radius), cr, fit))
         # a hairline border around the whole block, as x.com draws
-        ops.append(("frame", px(x), px(y), px(w), px(h), px(radius), corners, T["line"]))
+        if not bare:
+            ops.append(("frame", px(x), px(y), px(w), px(h), px(radius), corners, T["line"]))
         return h
+
+    chain, p = [], post
+    while p:
+        chain.append(p)
+        p = p.get("quote")
+    if media_only and any(p["media"] for p in chain):
+        y = 0
+        for p in chain:
+            if p["media"]:
+                y += 4 if y else 0
+                y += media_block(p["media"], 0, y, COL, (False,) * 4, False, bare=True)
+        h = px(y)
+        L.height = h + (h % 2)
+        return _lead_cell(L)
 
     def quote_block(q, x, y, w, depth):
         """A quoted post as a card; returns its height."""
@@ -694,6 +712,11 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     y += PAD - 4
     h = px(y)
     L.height = h + (h % 2)
+    return _lead_cell(L)
+
+
+def _lead_cell(L: Layout) -> Layout:
+    """Mark the cell whose video the render's length and sound come from."""
     first = tweet.lead([c.item for c in L.cells])
     for c in L.cells:
         if c.item is first:
