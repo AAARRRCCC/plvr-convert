@@ -70,6 +70,7 @@ TARGET_MB = float(os.environ.get("TARGET_MB", 10))
 MAXRATE_KBPS = 3000
 RENDER_TIMEOUT = 900
 FULL = 10_000                                        # lines of text: no cut
+GIF_WIDTH = int(os.environ.get("GIF_WIDTH", 720))    # a real gif is scaled down to this, never up
 
 # Discord's unfurler sends its own UA and, for some fetches, one of these
 # fixed old Firefox strings.
@@ -177,15 +178,18 @@ async def _render(tid: str, f: flags.Flags) -> dict:
     meta = _describe(tid, post, L, f)
     try:
         async with _slots:
-            # the poster is the card with each video's thumbnail drawn in: the png
-            # itself for a post without video, the preview image for one with,
-            # drawn while ffmpeg runs since Discord only waits on the mp4
-            poster = asyncio.to_thread(card.render, L, False)
-            if L.cells:
-                png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
+            if meta["ext"] == "gif":
+                await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
             else:
-                png = await poster
-            _write(DIR / f"{name}.png", png)
+                # the poster is the card with each video's thumbnail drawn in: the png
+                # itself for a post without video, the preview image for one with,
+                # drawn while ffmpeg runs since Discord only waits on the mp4
+                poster = asyncio.to_thread(card.render, L, False)
+                if L.cells:
+                    png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
+                else:
+                    png = await poster
+                _write(DIR / f"{name}.png", png)
     except asyncio.CancelledError:
         log.info("cancelled %s%s after %.1fs", tid, f.query(), time.time() - t0)
         try:
@@ -194,9 +198,59 @@ async def _render(tid: str, f: flags.Flags) -> dict:
             pass   # still open for a stream; the prune takes it later
         raise
     _write(DIR / f"{name}.json", json.dumps(meta).encode())
-    log.info("rendered %s%s %s %dx%d in %.1fs", tid, f.query(), meta["ext"], L.width, L.height, time.time() - t0)
+    log.info("rendered %s%s %s %dx%d in %.1fs", tid, f.query(), meta["ext"], meta["width"], meta["height"], time.time() - t0)
     await asyncio.to_thread(_prune)
     return meta
+
+
+def _lone_gif(post: dict, f: flags.Flags) -> dict | None:
+    """With the media flag, the gif that is all there is to show, if it is:
+    it goes out as a real gif, which a chat app lets you save as one."""
+    if not f.media:
+        return None
+    items, p = [], post
+    while p:
+        items += p["media"]
+        p = p.get("quote")
+    return items[0] if len(items) == 1 and items[0]["kind"] == "gif" and not items[0].get("still") else None
+
+
+def _gif_size(item: dict) -> tuple[int, int]:
+    w, h = item.get("w") or GIF_WIDTH, item.get("h") or GIF_WIDTH
+    if w > GIF_WIDTH:
+        w, h = GIF_WIDTH, round(h * GIF_WIDTH / w)
+    return w, h + h % 2
+
+
+async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
+    """x.com's mp4 of a gif, back into a gif: its own frames at its own size
+    (down to GIF_WIDTH), through a palette made from those frames, looping."""
+    rs.assert_public(item["url"])
+    w, _ = _gif_size(item)
+    argv = [shot.FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
+    if f.start:
+        argv += ["-ss", f"{f.start:.3f}"]
+    argv += ["-i", shot._urlfor(shot._fmt(item))]
+    if f.end:
+        argv += ["-t", f"{f.end - f.start:.3f}"]
+    tmp = dest.with_name(dest.name + ".tmp")
+    argv += ["-vf", f"scale={w}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
+             "-loop", "0", "-f", "gif", str(tmp)]
+    proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    try:
+        _, err = await asyncio.wait_for(proc.communicate(), RENDER_TIMEOUT)
+    except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+        proc.kill()
+        await proc.wait()
+        tmp.unlink(missing_ok=True)
+        if isinstance(e, asyncio.CancelledError):
+            raise
+        raise rs.ResolveError("the gif took too long to make")
+    if proc.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        lines = err.decode(errors="replace").strip().splitlines()
+        raise rs.ResolveError("the gif couldn't be made: " + (lines[-1][:160] if lines else "unknown error"))
+    tmp.replace(dest)
 
 
 async def _mp4(s: shot.Shot, dest: Path) -> None:
@@ -300,20 +354,21 @@ def _og(req: Request, m: dict, bare: bool = False) -> str:
     base = _base(req)
     e = lambda s: html.escape(str(s), quote=True)
     title = f"{m['name']} (@{m['handle']})"
-    png, mp4 = _file(base, m, "png"), _file(base, m, "mp4")
+    png, mp4 = _file(base, m, "gif" if m["ext"] == "gif" else "png"), _file(base, m, "mp4")
+    kind = "image/gif" if m["ext"] == "gif" else "image/png"
     if bare:
         return f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="theme-color" content="#000000">
 <meta name="twitter:card" content="summary_large_image">
 <meta property="og:image" content="{e(png)}">
-<meta property="og:image:type" content="image/png">
+<meta property="og:image:type" content="{kind}">
 <meta property="og:image:width" content="{m['width']}">
 <meta property="og:image:height" content="{m['height']}">
 </head><body></body></html>"""
     tags = [
         ("og:site_name", "x.com"), ("og:title", title), ("og:description", m["text"][:300]), ("og:url", m["url"]),
-        ("og:image", png), ("og:image:type", "image/png"),
+        ("og:image", png), ("og:image:type", kind),
         ("og:image:width", m["width"]), ("og:image:height", m["height"]),
     ]
     if m["ext"] == "mp4":
@@ -411,7 +466,7 @@ async def oembed(name: str, req: Request):
 
 @app.get("/m/{name}")
 async def file(name: str, req: Request):
-    m = re.fullmatch(r"(\d{1,20})\.(mp4|png)", name)
+    m = re.fullmatch(r"(\d{1,20})\.(mp4|png|gif)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
@@ -430,9 +485,9 @@ async def file(name: str, req: Request):
         return JSONResponse({"error": "the render was cancelled"}, status_code=410)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
-    if ext == "mp4" and meta["ext"] != "mp4":
+    if ext != "png" and meta["ext"] != ext or ext == "png" and meta["ext"] == "gif":
         return Response(status_code=404)
-    return FileResponse(DIR / f"{stem}.{ext}", media_type=f"video/mp4" if ext == "mp4" else "image/png",
+    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif"}.get(ext, "image/png"),
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 
@@ -560,7 +615,7 @@ async def post(path: str, req: Request):
     except rs.ResolveError as e:
         log.info("post %s: %s", tid, e)
         return _to_x(req)
-    if f.raw or discord and meta["ext"] == "mp4":
+    if f.raw or discord and meta["ext"] in ("mp4", "gif"):
         return RedirectResponse(_file(_base(req), meta, meta["ext"]), status_code=302)
     return HTMLResponse(_og(req, meta, bare=discord))
 
@@ -577,5 +632,7 @@ def _pending(tid: str, post: dict, f: flags.Flags) -> dict:
 
 
 def _describe(tid: str, post: dict, L: card.Layout, f: flags.Flags) -> dict:
+    g = _lone_gif(post, f)
+    w, h, ext = (*_gif_size(g), "gif") if g else (L.width, L.height, "mp4" if L.cells else "png")
     return {"id": tid, "url": post["url"], "name": post["name"], "handle": post["handle"], "text": tweet.plain_text(post),
-            "width": L.width, "height": L.height, "ext": "mp4" if L.cells else "png", "query": f.query()}
+            "width": w, "height": h, "ext": ext, "query": f.query()}

@@ -12,7 +12,8 @@ flag with a value it can't read.
     q            quote depth 0-3 (default 1)
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
-    media        the media alone, stacked edge to edge: no name, text or stats
+    media        the media alone, stacked edge to edge: no name, text or stats;
+                 a lone gif is a real gif, from x.com's own file
     lines        cut the text after this many lines, with "Show more"
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
     plain        a video post goes out as x.com's own file, not the render
@@ -65,6 +66,7 @@ LOOK
   theme=dim       or theme=light
   lines=5         cut the text after 5 lines
   media           the video/images alone, nothing else of the post
+                  (a gif on its own comes out as a real gif you can save)
 
 TIMING
   start=1:30&end=1:45   clip the video (90, 1:30 and 1m30s all work)
