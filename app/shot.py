@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -19,6 +22,8 @@ from .stream import CHUNK, FFMPEG, FIRST_BYTE_TIMEOUT, Started, _kill, _rest, _u
 log = logging.getLogger("convert.shot")
 
 MAX_DURATION = 600   # x.com's own cap is ten minutes for most accounts
+GIF_LOOP = 10        # seconds a leading gif is looped to: a chat app plays the video once
+FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 
 
 @dataclass
@@ -27,6 +32,7 @@ class Shot:
     layout: card.Layout
     plan: Plan
     start: float = 0.0   # where the lead video is read from
+    loops: int = 0       # extra plays of the lead video, -1 for no end
 
     @property
     def cells(self):
@@ -63,6 +69,17 @@ def make(post: dict, o: dict, max_lines: int = card.MAX_LINES, theme: str = "dar
     if L.cells:
         master = next(c for c in L.cells if c.master)
         full = master.item.get("duration") or 0
+        loops = 0
+        if master.item["kind"] == "gif":
+            # x.com gives a gif no length, and one played once is over in a
+            # moment: it goes round whole times to about GIF_LOOP, or, when
+            # its length can't be read, round and round with GIF_LOOP the cut
+            full = full or _probe(master.item)
+            if full:
+                loops = max(1, math.ceil(GIF_LOOP / full)) - 1
+                full *= loops + 1
+            else:
+                loops, full = -1, GIF_LOOP
         start = min(start, full) if full else start
         stop = min(end, full) if end and full else end or full
         dur = min(MAX_DURATION, max(0.0, stop - start)) or None
@@ -70,9 +87,21 @@ def make(post: dict, o: dict, max_lines: int = card.MAX_LINES, theme: str = "dar
         label = f"screenshot · mp4 · {size}" + (f" · {others} more video{'s' if others > 1 else ''}, muted" if others else "")
         p = Plan("shot", "mp4", filename(info, o, "mp4", None, None, "screenshot"), label, 0)
         p.args = [str(dur or 0)]
-        return Shot(post, L, p, start)
+        return Shot(post, L, p, start, loops)
     p = Plan("shot", "png", filename(info, o, "png", None, None, "screenshot"), f"screenshot · png · {size}", 0)
     return Shot(post, L, p)
+
+
+def _probe(item: dict) -> float:
+    """A video's length read from the file itself, 0 if it can't be."""
+    try:
+        assert_public(item["url"])
+        out = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", _urlfor(_fmt(item))],
+                             capture_output=True, text=True, timeout=15).stdout
+        return max(0.0, float(out.strip() or 0))
+    except (OSError, subprocess.SubprocessError, ValueError, ResolveError) as e:
+        log.info("probe %s: %s", item["url"][-40:], type(e).__name__)
+        return 0.0
 
 
 def _fmt(item: dict) -> Fmt:
@@ -94,7 +123,8 @@ def _graph(L: card.Layout) -> tuple[list[str], str, int]:
         else:
             sc = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
         parts.append(f"[{n}:v]{sc},setsar=1,fps=30[v{n}]")
-        parts.append(f"[{prev}][v{n}]overlay={c.x}:{c.y}:eof_action=pass[b{n}]")
+        # the lead video's end is the render's end; any other stops where it is
+        parts.append(f"[{prev}][v{n}]overlay={c.x}:{c.y}:eof_action={'endall' if c.master else 'pass'}[b{n}]")
         prev = f"b{n}"
         if c.master:
             master_idx = n
@@ -112,8 +142,11 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
         f = _fmt(c.item)
         if not c.master:
             argv += ["-stream_loop", "-1"]
-        elif shot.start:
-            argv += ["-ss", f"{shot.start:.3f}"]
+        else:
+            if shot.loops:
+                argv += ["-stream_loop", str(shot.loops)]
+            if shot.start:
+                argv += ["-ss", f"{shot.start:.3f}"]
         argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
     parts, out, master = _graph(L)
     dur = float(p.args[0]) if p.args else 0
