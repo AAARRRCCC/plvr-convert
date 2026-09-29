@@ -161,8 +161,12 @@ def _current_cancelled() -> bool:
 
 
 async def _post(tid: str, f: flags.Flags) -> dict:
-    """The post as the flags have it: read to their quote depth, each video marked."""
-    return flags.apply(await tweet.fetch(tid, f.depth), f)
+    """The post as the flags have it: read to their quote depth, from the
+    quoted post with the quote flag, each video marked."""
+    post = await tweet.fetch(tid, f.depth + f.quote)
+    if f.quote and post.get("quote"):
+        post = post["quote"]
+    return flags.apply(post, f)
 
 
 def _make(post: dict, f: flags.Flags) -> shot.Shot:
@@ -411,7 +415,7 @@ def _text(post: dict) -> str:
     return text
 
 
-def _plain(req: Request, post: dict, q: str = "") -> str:
+def _plain(req: Request, tid: str, post: dict, q: str = "") -> str:
     """A plain embed: name, text, and the video as x.com serves it. Discord
     shows no description on an embed with a video, so the text also goes in
     the oEmbed author name, which it does show."""
@@ -432,7 +436,7 @@ def _plain(req: Request, post: dict, q: str = "") -> str:
 <title>{e(title)}</title>
 <meta name="theme-color" content="#000000">
 <meta name="twitter:card" content="player">
-<link rel="alternate" type="application/json+oembed" href="{e(_base(req))}/o/{e(post['id'])}.json{e(q)}">
+<link rel="alternate" type="application/json+oembed" href="{e(_base(req))}/o/{e(tid)}.json{e(q)}">
 {head}
 <meta http-equiv="refresh" content="0; url={e(post['url'])}">
 </head><body></body></html>"""
@@ -603,7 +607,7 @@ async def post(path: str, req: Request):
                 # too long to render: x.com's own file, or a plain embed of it
                 if f.raw or f.media and discord:
                     return RedirectResponse(lead["url"], status_code=302)
-                return HTMLResponse(_plain(req, post_, f.query()))
+                return HTMLResponse(_plain(req, tid, post_, f.query()))
         if meta is None:
             # the tags and the redirect need only the size and kind, so they go
             # out while the render runs; the file requests that follow stream

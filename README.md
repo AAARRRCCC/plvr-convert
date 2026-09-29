@@ -32,9 +32,10 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 
 | flag | values | |
 |---|---|---|
-| `v1`..`v9` | `image`, `mute`, `sound`, `hide`, `video` | one video, counted from the top post down through its quotes: `image` is its still, `sound` makes it the one heard and timed |
+| `v1`..`v9` | `image`, `mute`, `sound`, `hide`, `video` | one video, counted from the top post down through its quotes, only those there (with no video in the top post, `v1` is the quote's): `image` is its still, `sound` makes it the one heard and timed |
 | `v` | the same | every video; a numbered flag wins |
 | `q` | `0`-`3` | quote depth (default 1) |
+| `quote` | | start from the quoted post, leaving the top one out |
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |
 | `lines` | a number | cut the text there, with "Show more" |

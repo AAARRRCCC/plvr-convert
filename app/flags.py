@@ -10,6 +10,8 @@ flag with a value it can't read.
                  one carries the audio and sets the length), hide, video
     v            every video, the same values; a numbered flag wins over it
     q            quote depth 0-3 (default 1)
+    quote        start from the post it quotes, leaving the top post out; the
+                 other flags, video numbers too, count from there
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
     media        the media alone, stacked edge to edge: no name, text or stats;
@@ -22,8 +24,9 @@ flag with a value it can't read.
     cancel       stop every render of this post that is still running
     help         the guide below, as plain text, instead of the post
 
-Videos are counted from the top post down through its quotes, so on a post
-with a video quoting a post with a video, v1 is the post's and v2 the quote's.
+Videos are counted from the top post down through its quotes, only the ones
+that are there: on a post with a video quoting a post with a video, v1 is the
+post's and v2 the quote's, but when the top post has none, v1 is the quote's.
 """
 from __future__ import annotations
 
@@ -39,7 +42,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -53,7 +56,9 @@ x.com's own s=20 / t=... are ignored.
 
     https://{host}/jaydiarie/status/2102564951177011259?s=20&v2=image
 
-VIDEOS  (numbered top post -> quotes: v1 = the post's video, v2 = the quoted one)
+VIDEOS  (counted from the top: v1 is the first video there is, v2 the next)
+    both posts have one: v1 = the post's, v2 = the quoted one's
+    only the quoted tweet has one: that one is v1
   v2=image        a still, no playback
   v2=mute         plays silently
   v2=sound        this one gets the audio and sets the length
@@ -62,6 +67,8 @@ VIDEOS  (numbered top post -> quotes: v1 = the post's video, v2 = the quoted one
 
 LOOK
   q=0 .. q=3      how many quote levels (default 1; q=0 drops the quote)
+  quote           only the quoted tweet, without the one quoting it
+                  (quote&media: just the quoted tweet's video)
   stats=0         no reply/repost/like row
   theme=dim       or theme=light
   lines=5         cut the text after 5 lines
@@ -87,6 +94,7 @@ class Flags:
     theme: str = "dark"
     lines: int | None = None
     media: bool = False
+    quote: bool = False
     start: float = 0.0
     end: float | None = None
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
@@ -103,6 +111,8 @@ class Flags:
         """The flags that change the render, as a query string for its file
         links ("" for none), in one order so each render has one address."""
         q = []
+        if self.quote:
+            q.append(("quote", 1))
         if self.depth != DEPTH:
             q.append(("q", self.depth))
         if not self.stats:
@@ -163,7 +173,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "raw", "cancel", "media", "help") and _bool(v) is not None:
+        elif k in ("stats", "plain", "raw", "cancel", "media", "help", "quote") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()
