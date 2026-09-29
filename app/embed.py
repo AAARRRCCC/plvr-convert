@@ -42,6 +42,7 @@ import re
 import time
 from urllib.parse import parse_qsl
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -510,6 +511,56 @@ async def _serve(name: str, f: flags.Flags):
 
 
 _cancelled: dict[str, tuple[float, int]] = {}
+_gif_flags: dict[str, tuple[float, flags.Flags]] = {}   # post id -> the flags Discord's page fetch came with
+
+
+def _activity(req: Request, tid: str, post: dict) -> str:
+    """Discord's page for a lone gif: a link that makes it read the post as a
+    Mastodon status, the one way it shows a linked gif as a gif (looping, and
+    savable to its gif favourites) rather than as a still or a video."""
+    e = lambda s: html.escape(str(s), quote=True)
+    title = f"{post['name']} (@{post['handle']})"
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<title>{e(title)}</title>
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="{e(title)}">
+<link type="application/activity+json" href="{e(_base(req))}/users/{e(post['handle'])}/statuses/{e(tid)}">
+<meta http-equiv="refresh" content="0; url={e(post['url'])}">
+</head><body></body></html>"""
+
+
+@app.get("/api/v1/statuses/{tid}")
+async def status(tid: str):
+    """The lone gif as a Mastodon status with a gifv attachment: x.com's own
+    mp4 of it, which Discord loops like a gif. The request carries only the id,
+    so the flags are the ones the page fetch just before it came with."""
+    if not re.fullmatch(r"\d{1,20}", tid):
+        return JSONResponse({"error": "Record not found"}, status_code=404)
+    at, f = _gif_flags.get(tid, (0.0, flags.Flags(media=True)))
+    if time.time() - at > 600:
+        f = flags.Flags(media=True)
+    try:
+        post = await _post(tid, f)
+    except rs.ResolveError as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+    g = _lone_gif(post, f)
+    if g is None:
+        return JSONResponse({"error": "Record not found"}, status_code=404)
+    created = datetime.fromtimestamp(post["created"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    return {
+        "id": tid, "url": post["url"], "uri": post["url"], "created_at": created, "edited_at": None,
+        "content": "", "spoiler_text": "", "sensitive": False, "visibility": "public", "language": None,
+        "in_reply_to_id": None, "in_reply_to_account_id": None, "reblog": None, "application": {"name": None, "website": None},
+        "media_attachments": [{"id": "0", "type": "gifv", "url": g["url"], "preview_url": g.get("poster") or g["url"], "remote_url": None,
+                               "description": None, "meta": {"original": {"width": g["w"], "height": g["h"]}}}],
+        "mentions": [], "tags": [], "emojis": [],
+        "account": {
+            "id": post["handle"], "username": post["handle"], "acct": post["handle"], "display_name": post["name"],
+            "url": f"https://x.com/{post['handle']}", "uri": f"https://x.com/{post['handle']}",
+            "avatar": post["avatar"], "avatar_static": post["avatar"], "locked": False, "bot": False, "emojis": [], "fields": [],
+        },
+    }
 _help_png: dict[str, bytes] = {}
 
 
@@ -612,6 +663,15 @@ async def post(path: str, req: Request):
     if not m or not (bot or f.raw):
         return _to_x(req)
     tid = m.group(1)
+    if discord and f.media and not f.raw:
+        try:
+            post_ = await _post(tid, f)
+        except rs.ResolveError as e:
+            log.info("post %s: %s", tid, e)
+            return _to_x(req)
+        if _lone_gif(post_, f):
+            _gif_flags[tid] = (time.time(), f)
+            return HTMLResponse(_activity(req, tid, post_))
     try:
         meta = _meta(_name(tid, f))
         if meta is None or f.plain:
