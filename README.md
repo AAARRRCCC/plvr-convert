@@ -36,6 +36,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `v` | the same | every video; a numbered flag wins |
 | `q` | `0`-`3` | quote depth (default 1) |
 | `quote` | | start from the quoted post, leaving the top one out |
+| `lang` | `es`, `ja`, `fr`, ... | translate the text (fxtwitter's translation), with "Translated from ..." under it |
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |
 | `lines` | a number | cut the text there, with "Show more" |

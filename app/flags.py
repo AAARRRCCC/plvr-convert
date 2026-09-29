@@ -14,6 +14,7 @@ flag with a value it can't read.
                  other flags, video numbers too, count from there
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
+    lang         translate the text into this language (es, ja, fr, de, ...)
     media        the media alone, stacked edge to edge: no name, text or stats;
                  a lone gif is a real gif, from x.com's own file
     lines        cut the text after this many lines, with "Show more"
@@ -42,11 +43,20 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
           "off": "hide", "none": "hide", "play": "video", "on": "video"}
+
+# a language by name as well as by code
+LANGS = {
+    "english": "en", "spanish": "es", "espanol": "es", "french": "fr", "german": "de", "italian": "it", "portuguese": "pt",
+    "dutch": "nl", "polish": "pl", "russian": "ru", "ukrainian": "uk", "turkish": "tr", "arabic": "ar", "hebrew": "he",
+    "persian": "fa", "hindi": "hi", "bengali": "bn", "japanese": "ja", "korean": "ko", "chinese": "zh", "thai": "th",
+    "vietnamese": "vi", "indonesian": "id", "malay": "ms", "tagalog": "tl", "filipino": "tl", "swedish": "sv",
+    "norwegian": "no", "danish": "da", "finnish": "fi", "greek": "el", "czech": "cs", "romanian": "ro", "hungarian": "hu",
+}
 
 HELP = """embed flags
 ===========
@@ -67,6 +77,7 @@ VIDEOS  (counted from the top: v1 is the first video there is, v2 the next)
 
 LOOK
   q=0 .. q=3      how many quote levels (default 1; q=0 drops the quote)
+  lang=es         translate the text (a code like ja, fr, de, ko, or a name like japanese)
   quote           only the quoted tweet, without the one quoting it
                   (quote&media: just the quoted tweet's video)
   stats=0         no reply/repost/like row
@@ -95,6 +106,7 @@ class Flags:
     lines: int | None = None
     media: bool = False
     quote: bool = False
+    lang: str | None = None
     start: float = 0.0
     end: float | None = None
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
@@ -121,6 +133,8 @@ class Flags:
             q.append(("theme", self.theme))
         if self.lines is not None:
             q.append(("lines", self.lines))
+        if self.lang:
+            q.append(("lang", self.lang))
         if self.media:
             q.append(("media", 1))
         if self.start:
@@ -177,6 +191,8 @@ def parse(params: Mapping[str, str]) -> Flags:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()
+        elif k == "lang" and (LANGS.get(v.lower()) or re.fullmatch(r"[a-z]{2,3}(-[a-z0-9]{2,4})?", v.lower())):
+            kw["lang"] = LANGS.get(v.lower(), v.lower())
         elif k == "lines" and v.isdigit() and int(v) > 0:
             kw["lines"] = min(MAX_LINES, int(v))
         elif k in ("start", "end") and seconds(v) is not None:

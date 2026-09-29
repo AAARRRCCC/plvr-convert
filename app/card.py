@@ -653,6 +653,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
             t = Text.make(q["spans"], 15, 20, False, T["text"], T["blue"], iw, MAX_LINES_QUOTE, T["blue"])
             ops.append(("lines", t, px(ix), px(y)))
             y += t.height
+        if q.get("translated"):
+            ops.append(("text", f"Translated from {q['translated']}", "regular", 13, px(ix), px(y + 2), T["gray"]))
+            y += 20
         # a deeper quote, inset
         if q.get("quote") and depth > 0:
             y += 12
@@ -689,6 +692,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         t = Text.make(post["spans"], 15, 20, False, T["text"], T["blue"], cw, max_lines, T["blue"])
         ops.append(("lines", t, px(x0), px(y)))
         y += t.height
+    if post.get("translated"):
+        ops.append(("text", f"Translated from {post['translated']}", "regular", 13, px(x0), px(y + 4), T["gray"]))
+        y += 22
     if post["media"]:
         y += 12
         y += media_block(post["media"], x0, y, cw, (True, True, True, True), False)

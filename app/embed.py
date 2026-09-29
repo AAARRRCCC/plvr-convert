@@ -165,7 +165,7 @@ def _current_cancelled() -> bool:
 async def _post(tid: str, f: flags.Flags) -> dict:
     """The post as the flags have it: read to their quote depth, from the
     quoted post with the quote flag, each video marked."""
-    post = await tweet.fetch(tid, f.depth + f.quote)
+    post = await tweet.fetch(tid, f.depth + f.quote, f.lang)
     if f.quote and post.get("quote"):
         post = post["quote"]
     return flags.apply(post, f)

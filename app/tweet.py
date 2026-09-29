@@ -43,9 +43,10 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
-async def _fetch_raw(tid: str) -> dict:
+async def _fetch_raw(tid: str, lang: str | None = None) -> dict:
     try:
-        r = await client().get(API.format(id=tid))
+        # a language code on the end has fxtwitter add a translation
+        r = await client().get(API.format(id=tid) + (f"/{lang}" if lang else ""))
     except httpx.HTTPError as e:
         raise rs.ResolveError("x.com couldn't be reached right now") from e
     if r.status_code == 404:
@@ -67,27 +68,28 @@ async def _fetch_raw(tid: str) -> dict:
     return j["tweet"]
 
 
-async def fetch(tid: str, depth: int) -> dict:
-    """The post and, nested under "quote", up to `depth` posts it quotes."""
+async def fetch(tid: str, depth: int, lang: str | None = None) -> dict:
+    """The post and, nested under "quote", up to `depth` posts it quotes;
+    with `lang`, each one's text translated into it where x.com can."""
     depth = max(0, min(MAX_DEPTH, int(depth)))
-    key = f"tweet:{tid}:{depth}"
+    key = f"tweet:{tid}:{depth}:{lang or ''}"
     hit = rs.cached(key)
     if hit is not None:
         return hit
     t0 = time.time()
-    raw = await _fetch_raw(tid)
+    raw = await _fetch_raw(tid, lang)
     post = _normalize(raw)
     cur, q, d = post, raw.get("quote"), depth
     while d > 0 and q:
         # fxtwitter nests one level; the deeper posts are read on their own
         if d > 1 and "quote" not in q:
             try:
-                q = await _fetch_raw(str(q.get("id")))
+                q = await _fetch_raw(str(q.get("id")), lang)
             except rs.ResolveError:
                 pass
         cur["quote"] = _normalize(q)
         cur, q, d = cur["quote"], q.get("quote"), d - 1
-    log.info("tweet %s depth %d %.1fs", tid, depth, time.time() - t0)
+    log.info("tweet %s depth %d%s %.1fs", tid, depth, f" {lang}" if lang else "", time.time() - t0)
     rs._put(key, post)
     return post
 
@@ -188,6 +190,13 @@ def _normalize(raw: dict) -> dict:
             created = datetime.strptime(raw.get("created_at", ""), "%a %b %d %H:%M:%S %z %Y").timestamp()
         except ValueError:
             created = time.time()
+    tr = raw.get("translation") or {}
+    spans = _spans(raw)
+    translated = None
+    if tr.get("text") and tr.get("source_lang") != tr.get("target_lang"):
+        # the translation is plain text: its links and mentions aren't marked
+        spans = [{"text": html.unescape(tr["text"]).strip(), "link": False}]
+        translated = tr.get("source_lang_en") or tr.get("source_lang") or "another language"
     return {
         "id": str(raw.get("id") or ""),
         "url": raw.get("url") or f"https://x.com/i/status/{raw.get('id')}",
@@ -196,7 +205,8 @@ def _normalize(raw: dict) -> dict:
         "avatar": a.get("avatar_url"),
         "verified": bool(ver.get("verified")),
         "verified_type": ver.get("type"),
-        "spans": _spans(raw),
+        "spans": spans,
+        "translated": translated,     # the language it was translated from, or None
         "created": float(created),
         "replies": int(raw.get("replies") or 0),
         "reposts": int(raw.get("retweets") or 0),
