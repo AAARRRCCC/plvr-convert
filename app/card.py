@@ -579,7 +579,6 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     T = THEMES.get(theme, THEMES["dark"])
     L = Layout(COL * S, 0, T)
     ops = L.ops
-    master = [None]
 
     def px(v):
         return int(round(v * S))
@@ -598,10 +597,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
             if it["kind"] == "photo":
                 ops.append(("image", it["url"], px(bx), px(by), px(bw), px(bh), px(radius), cr, "cover"))
             else:
-                cell = Cell(px(bx), px(by), px(bw), px(bh), fit, it, px(radius), cr)
-                if master[0] is None and it["kind"] == "video":
-                    cell.master = True; master[0] = cell
-                L.cells.append(cell)
+                # a still is its poster alone, with no cell for ffmpeg to fill
+                if not it.get("still"):
+                    L.cells.append(Cell(px(bx), px(by), px(bw), px(bh), fit, it, px(radius), cr))
                 ops.append(("poster", it.get("poster"), px(bx), px(by), px(bw), px(bh), px(radius), cr, fit))
         # a hairline border around the whole block, as x.com draws
         ops.append(("frame", px(x), px(y), px(w), px(h), px(radius), corners, T["line"]))
@@ -696,8 +694,11 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     y += PAD - 4
     h = px(y)
     L.height = h + (h % 2)
-    if master[0] is None and L.cells:
-        L.cells[0].master = True
+    first = tweet.lead([c.item for c in L.cells])
+    for c in L.cells:
+        if c.item is first:
+            c.master = True
+            break
     return L
 
 

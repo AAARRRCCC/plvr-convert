@@ -26,6 +26,23 @@ disk and nothing is kept.
 own preview. Discord is redirected to the mp4 at once and streamed it while
 it renders, so it plays like an upload; other link-preview fetchers get Open
 Graph tags; a browser goes on to x.com. Run it with `uvicorn app.embed:app`.
+
+Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
+`t=...` and anything else unknown are ignored and passed on to x.com.
+
+| flag | values | |
+|---|---|---|
+| `v1`..`v9` | `image`, `mute`, `sound`, `hide`, `video` | one video, counted from the top post down through its quotes: `image` is its still, `sound` makes it the one heard and timed |
+| `v` | the same | every video; a numbered flag wins |
+| `q` | `0`-`3` | quote depth (default 1) |
+| `stats` | `0` | no reply/repost/like row |
+| `theme` | `dark`, `dim`, `light` | |
+| `lines` | a number | cut the text there, with "Show more" |
+| `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a clip under `LONG_VIDEO` renders even from a long one |
+| `plain` | | a video post goes out as x.com's own file |
+| `raw` | | anyone, a browser too, is sent to the rendered file |
+
+e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
 `EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `LONG_VIDEO`, `X264_PRESET`,
 `TARGET_MB`.

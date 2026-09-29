@@ -214,13 +214,23 @@ def plain_text(post: dict) -> str:
 
 
 def videos(post: dict) -> list[dict]:
-    """Every playable item in the post and its quotes, the post's own first."""
+    """Every playable item in the post and its quotes, the post's own first.
+    A video marked as a still is drawn as its poster and doesn't count."""
     out = []
     p: dict | None = post
     while p:
-        out += [m for m in p["media"] if m["kind"] in ("video", "gif")]
+        out += [m for m in p["media"] if m["kind"] in ("video", "gif") and not m.get("still")]
         p = p.get("quote")
     return out
+
+
+def lead(items: list[dict]) -> dict | None:
+    """The item a render's length and sound come from: one marked for sound,
+    else the first real video not muted, else the first video, else a gif."""
+    return (next((m for m in items if m.get("sound")), None)
+            or next((m for m in items if m["kind"] == "video" and not m.get("mute")), None)
+            or next((m for m in items if m["kind"] == "video"), None)
+            or (items[0] if items else None))
 
 
 def relative(created: float, now: float | None = None) -> str:

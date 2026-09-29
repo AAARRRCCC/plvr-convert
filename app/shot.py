@@ -26,6 +26,7 @@ class Shot:
     post: dict
     layout: card.Layout
     plan: Plan
+    start: float = 0.0   # where the lead video is read from
 
     @property
     def cells(self):
@@ -52,18 +53,24 @@ def describe(post: dict) -> dict:
     }
 
 
-def make(post: dict, o: dict, max_lines: int = card.MAX_LINES) -> Shot:
-    L = card.layout(post, "dark", o["shot_stats"], max_lines=max_lines)
+def make(post: dict, o: dict, max_lines: int = card.MAX_LINES, theme: str = "dark",
+         start: float = 0.0, end: float | None = None) -> Shot:
+    """The layout and plan; `start` and `end` clip the lead video, whose
+    length the whole render takes."""
+    L = card.layout(post, theme, o["shot_stats"], max_lines=max_lines)
     info = {"title": tweet.plain_text(post)[:80] or post["handle"], "id": post["id"], "extractor_key": "twitter"}
     size = f"{L.width}×{L.height}"
     if L.cells:
         master = next(c for c in L.cells if c.master)
-        dur = min(MAX_DURATION, master.item.get("duration") or 0) or None
+        full = master.item.get("duration") or 0
+        start = min(start, full) if full else start
+        stop = min(end, full) if end and full else end or full
+        dur = min(MAX_DURATION, max(0.0, stop - start)) or None
         others = len(L.cells) - 1
         label = f"screenshot · mp4 · {size}" + (f" · {others} more video{'s' if others > 1 else ''}, muted" if others else "")
         p = Plan("shot", "mp4", filename(info, o, "mp4", None, None, "screenshot"), label, 0)
         p.args = [str(dur or 0)]
-        return Shot(post, L, p)
+        return Shot(post, L, p, start)
     p = Plan("shot", "png", filename(info, o, "png", None, None, "screenshot"), f"screenshot · png · {size}", 0)
     return Shot(post, L, p)
 
@@ -105,11 +112,15 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
         f = _fmt(c.item)
         if not c.master:
             argv += ["-stream_loop", "-1"]
+        elif shot.start:
+            argv += ["-ss", f"{shot.start:.3f}"]
         argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
     parts, out, master = _graph(L)
     dur = float(p.args[0]) if p.args else 0
-    argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]", "-map", f"{master}:a?",
-             "-c:v", "libx264", "-preset", preset, "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", "30",
+    argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]"]
+    if not any(c.master and c.item.get("mute") for c in L.cells):
+        argv += ["-map", f"{master}:a?"]
+    argv += ["-c:v", "libx264", "-preset", preset, "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", "30",
              "-c:a", "aac", "-b:a", "160k", "-shortest"]
     if dur:
         argv += ["-t", f"{dur:.3f}"]
