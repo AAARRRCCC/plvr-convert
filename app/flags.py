@@ -16,6 +16,8 @@ flag with a value it can't read.
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
     plain        a video post goes out as x.com's own file, not the render
     raw          every visitor, a browser too, is sent to the rendered file
+                 (or to x.com's own file, for a video too long to render)
+    cancel       stop every render of this post that is still running
 
 Videos are counted from the top post down through its quotes, so on a post
 with a video quoting a post with a video, v1 is the post's and v2 the quote's.
@@ -34,7 +36,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -52,6 +54,7 @@ class Flags:
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
     plain: bool = False
     raw: bool = False
+    cancel: bool = False
 
     def treatment(self, n: int) -> str:
         per = dict(self.videos)
@@ -119,7 +122,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "raw") and _bool(v) is not None:
+        elif k in ("stats", "plain", "raw", "cancel") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

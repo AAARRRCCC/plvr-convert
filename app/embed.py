@@ -44,7 +44,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 from . import card, flags, shot, tunnel, tweet
 from . import plan as planning
@@ -97,6 +97,10 @@ class Busy(Exception):
     pass
 
 
+class Cancelled(Exception):
+    pass
+
+
 _jobs: dict[str, asyncio.Task] = {}
 _slots = asyncio.Semaphore(RENDERS)
 
@@ -128,11 +132,31 @@ def render(tid: str, f: flags.Flags) -> asyncio.Task:
     return t
 
 
+def cancel(tid: str) -> int:
+    """Stop every running render of a post, whatever its flags; how many."""
+    hit = [t for name, t in _jobs.items() if name.split("-")[0] == tid and not t.done()]
+    for t in hit:
+        t.cancel()
+    return len(hit)
+
+
 async def media(tid: str, f: flags.Flags) -> dict:
     m = _meta(_name(tid, f))
     if m is not None:
         return m
-    return await asyncio.shield(render(tid, f))
+    t = render(tid, f)
+    try:
+        return await asyncio.shield(t)
+    except asyncio.CancelledError:
+        # the render was stopped, not this request
+        if t.cancelled() and not _current_cancelled():
+            raise Cancelled() from None
+        raise
+
+
+def _current_cancelled() -> bool:
+    task = asyncio.current_task()
+    return bool(task and task.cancelling())
 
 
 async def _post(tid: str, f: flags.Flags) -> dict:
@@ -151,16 +175,24 @@ async def _render(tid: str, f: flags.Flags) -> dict:
     s = await asyncio.to_thread(_make, post, f)
     L = s.layout
     meta = _describe(tid, post, L, f)
-    async with _slots:
-        # the poster is the card with each video's thumbnail drawn in: the png
-        # itself for a post without video, the preview image for one with,
-        # drawn while ffmpeg runs since Discord only waits on the mp4
-        poster = asyncio.to_thread(card.render, L, False)
-        if L.cells:
-            png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
-        else:
-            png = await poster
-        _write(DIR / f"{name}.png", png)
+    try:
+        async with _slots:
+            # the poster is the card with each video's thumbnail drawn in: the png
+            # itself for a post without video, the preview image for one with,
+            # drawn while ffmpeg runs since Discord only waits on the mp4
+            poster = asyncio.to_thread(card.render, L, False)
+            if L.cells:
+                png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
+            else:
+                png = await poster
+            _write(DIR / f"{name}.png", png)
+    except asyncio.CancelledError:
+        log.info("cancelled %s%s after %.1fs", tid, f.query(), time.time() - t0)
+        try:
+            (DIR / f"{name}.mp4").unlink(missing_ok=True)
+        except OSError:
+            pass   # still open for a stream; the prune takes it later
+        raise
     _write(DIR / f"{name}.json", json.dumps(meta).encode())
     log.info("rendered %s%s %s %dx%d in %.1fs", tid, f.query(), meta["ext"], L.width, L.height, time.time() - t0)
     await asyncio.to_thread(_prune)
@@ -182,6 +214,11 @@ async def _mp4(s: shot.Shot, dest: Path) -> None:
         proc.kill()
         await proc.wait()
         raise rs.ResolveError("the video took too long to compose")
+    except asyncio.CancelledError:
+        # cancelling the task leaves ffmpeg running unless it is killed here
+        proc.kill()
+        await proc.wait()
+        raise
     if proc.returncode != 0:
         lines = err.decode(errors="replace").strip().splitlines()
         raise rs.ResolveError("the video couldn't be composed: " + (lines[-1][:160] if lines else "unknown error"))
@@ -389,6 +426,8 @@ async def file(name: str, req: Request):
         meta = await media(tid, f)
     except Busy:
         return Response(status_code=503, headers={"Retry-After": "30"})
+    except Cancelled:
+        return JSONResponse({"error": "the render was cancelled"}, status_code=410)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
     if ext == "mp4" and meta["ext"] != "mp4":
@@ -403,6 +442,11 @@ async def post(path: str, req: Request):
     m = STATUS.match(req.url.path)
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
+    if m and f.cancel:
+        n = cancel(m.group(1))
+        log.info("cancel %s: %d render(s)", m.group(1), n)
+        return PlainTextResponse(f"stopped {n} render{'s' if n != 1 else ''} of {m.group(1)}\n" if n else f"nothing of {m.group(1)} is rendering\n",
+                                 headers={"Cache-Control": "no-store"})
     if not m or not (discord or f.raw or BOTS.search(ua)):
         return _to_x(req)
     tid = m.group(1)
@@ -411,7 +455,10 @@ async def post(path: str, req: Request):
         if meta is None or f.plain:
             post_ = await _post(tid, f)
             lead = _lead(post_)
-            if lead and not f.raw and (f.plain or _length(lead, f) > LONG_VIDEO):
+            if lead and (f.plain or _length(lead, f) > LONG_VIDEO):
+                # too long to render: x.com's own file, or a plain embed of it
+                if f.raw:
+                    return RedirectResponse(lead["url"], status_code=302)
                 return HTMLResponse(_plain(req, post_, f.query()))
         if meta is None:
             # the tags and the redirect need only the size and kind, so they go
