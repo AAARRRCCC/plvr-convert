@@ -40,7 +40,8 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `lines` | a number | cut the text there, with "Show more" |
 | `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a clip under `LONG_VIDEO` renders even from a long one |
 | `plain` | | a video post goes out as x.com's own file |
-| `raw` | | anyone, a browser too, is sent to the rendered file |
+| `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |
+| `cancel` | | stops every running render of the post, ffmpeg included |
 
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
