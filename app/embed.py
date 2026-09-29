@@ -436,21 +436,107 @@ async def file(name: str, req: Request):
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 
+_cancelled: dict[str, tuple[float, int]] = {}
+_help_png: dict[str, bytes] = {}
+
+
+def _host(req: Request) -> str:
+    return req.headers.get("host") or req.url.hostname or ""
+
+
+def _help_text(req: Request) -> str:
+    return flags.HELP.format(host=_host(req), long=f"{LONG_VIDEO:g}")
+
+
+def _card(req: Request, title: str, text: str, image: str | None = None) -> HTMLResponse:
+    """A plain link embed: a title, a line of text, and an image if given."""
+    e = lambda s: html.escape(str(s), quote=True)
+    tags = [("og:site_name", _host(req)), ("og:title", title), ("og:description", text)]
+    if image:
+        tags.append(("og:image", image))
+    head = "\n".join(f'<meta property="{k}" content="{e(v)}">' for k, v in tags)
+    return HTMLResponse(f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<title>{e(title)}</title>
+<meta name="theme-color" content="#1d9bf0">
+<meta name="twitter:card" content="{'summary_large_image' if image else 'summary'}">
+{head}
+</head><body></body></html>""", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/help.png")
+async def help_png(req: Request):
+    host = _host(req)
+    png = _help_png.get(host)
+    if png is None:
+        png = _help_png[host] = await asyncio.to_thread(_draw_help, _help_text(req))
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+
+def _draw_help(text: str) -> bytes:
+    """The guide as a dark card: headings in white, each flag in blue, its
+    meaning in grey, in a monospace face so the columns stay lined up."""
+    from PIL import Image, ImageDraw
+    import io
+    F = card.fonts()
+    size, lh, pad = 26, 38, 40
+    reg, bold = F.font("mono", size), F.font("mono-bold", size)
+    T = card.THEMES["dark"]
+    lines = text.rstrip("\n").splitlines()
+    lines = [l for l in lines if not (l and set(l) <= {"="})]
+    width = int(max(reg.getlength(l) for l in lines)) + 2 * pad
+    im = Image.new("RGB", (width, len(lines) * lh + 2 * pad), T["bg"])
+    d = ImageDraw.Draw(im)
+    for i, l in enumerate(lines):
+        y = pad + i * lh + lh - 10
+        if not l.strip():
+            continue
+        if not l.startswith(" "):
+            # a heading, or the opening lines; the first line is the title
+            head = i == 0 or l.split("(")[0].strip().isupper()
+            d.text((pad, y), l, font=bold if head else reg, fill=T["text"] if head else T["gray"], anchor="ls")
+        elif l.startswith("    "):
+            d.text((pad, y), l, font=reg, fill=T["blue"] if "://" in l else T["gray"], anchor="ls")
+        else:
+            # "  flag   meaning": the flag up to the first run of two spaces
+            body = l[2:]
+            cut = body.find("  ")
+            flag, rest = (body, "") if cut < 0 else (body[:cut], body[cut:])
+            x = pad + reg.getlength("  ")
+            d.text((x, y), flag, font=bold, fill=T["blue"], anchor="ls")
+            d.text((x + reg.getlength(flag), y), rest, font=reg, fill=T["text"], anchor="ls")
+    out = io.BytesIO()
+    im.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
 @app.get("/{path:path}")
 async def post(path: str, req: Request):
     ua = req.headers.get("user-agent", "")
     m = STATUS.match(req.url.path)
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
+    bot = discord or bool(BOTS.search(ua))
     if f.help or req.url.path.rstrip("/") == "/help":
-        host = req.headers.get("host") or req.url.hostname
-        return PlainTextResponse(flags.HELP.format(host=host, long=f"{LONG_VIDEO:g}"), headers={"Cache-Control": "no-store"})
+        if bot:
+            return _card(req, "embed flags", f"Swap x.com for {_host(req)} in a post link, then add flags after ? joined by &. "
+                                             f"The whole guide is in the image, and as text at {_base(req)}/help", f"{_base(req)}/help.png?v={VERSION}")
+        return PlainTextResponse(_help_text(req), headers={"Cache-Control": "no-store"})
     if m and f.cancel:
-        n = cancel(m.group(1))
-        log.info("cancel %s: %d render(s)", m.group(1), n)
-        return PlainTextResponse(f"stopped {n} render{'s' if n != 1 else ''} of {m.group(1)}\n" if n else f"nothing of {m.group(1)} is rendering\n",
-                                 headers={"Cache-Control": "no-store"})
-    if not m or not (discord or f.raw or BOTS.search(ua)):
+        tid = m.group(1)
+        n = cancel(tid)
+        # a chat app's unfurler fetches a link more than once: the later
+        # fetches report the cancel the first one made
+        if n:
+            _cancelled[tid] = (time.time(), n)
+        elif time.time() - _cancelled.get(tid, (0, 0))[0] < 120:
+            n = _cancelled[tid][1]
+        log.info("cancel %s: %d render(s)", tid, n)
+        msg = f"stopped {n} render{'s' if n != 1 else ''} of {tid}" if n else f"nothing of {tid} is rendering"
+        if bot:
+            return _card(req, "render cancelled" if n else "nothing to cancel", msg)
+        return PlainTextResponse(msg + "\n", headers={"Cache-Control": "no-store"})
+    if not m or not (bot or f.raw):
         return _to_x(req)
     tid = m.group(1)
     try:

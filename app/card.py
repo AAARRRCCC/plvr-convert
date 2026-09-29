@@ -59,6 +59,8 @@ class Fonts:
         "other": ["NotoSans-Regular.ttf", "NotoSans[wdth,wght].ttf", "segoeui.ttf", "DejaVuSans.ttf"],
         "other-bold": ["NotoSans-Bold.ttf", "NotoSans[wdth,wght].ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"],
         "emoji": ["NotoColorEmoji.ttf", "seguiemj.ttf"],
+        "mono": ["NotoSansMono-Regular.ttf", "NotoMono-Regular.ttf", "DejaVuSansMono.ttf", "consola.ttf"],
+        "mono-bold": ["NotoSansMono-Bold.ttf", "DejaVuSansMono-Bold.ttf", "consolab.ttf"],
     }
     DIRS = [d for d in os.environ.get("FONT_DIRS", "/usr/share/fonts:C:/Windows/Fonts").split(":") if d] if os.name != "nt" else \
            [d for d in os.environ.get("FONT_DIRS", "C:/Windows/Fonts;/usr/share/fonts").split(";") if d]
