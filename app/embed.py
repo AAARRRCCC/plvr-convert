@@ -442,6 +442,9 @@ async def post(path: str, req: Request):
     m = STATUS.match(req.url.path)
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
+    if f.help or req.url.path.rstrip("/") == "/help":
+        host = req.headers.get("host") or req.url.hostname
+        return PlainTextResponse(flags.HELP.format(host=host, long=f"{LONG_VIDEO:g}"), headers={"Cache-Control": "no-store"})
     if m and f.cancel:
         n = cancel(m.group(1))
         log.info("cancel %s: %d render(s)", m.group(1), n)

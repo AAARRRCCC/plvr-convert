@@ -43,6 +43,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `plain` | | a video post goes out as x.com's own file |
 | `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |
 | `cancel` | | stops every running render of the post, ffmpeg included |
+| `help` | | this guide as plain text, instead of the post (`/help` too) |
 
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
