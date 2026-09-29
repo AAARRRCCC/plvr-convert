@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import time
+from urllib.parse import parse_qsl
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -392,7 +393,11 @@ def _og(req: Request, m: dict, bare: bool = False) -> str:
 
 
 def _file(base: str, m: dict, ext: str) -> str:
-    return f"{base}/m/{m['id']}.{ext}{m.get('query', '')}"
+    """A render's file link, its flags in the path: Discord's image proxy
+    folds a query string into the name, and a gif whose link no longer ends
+    in .gif is shown as a still."""
+    q = m.get("query", "")
+    return f"{base}/m/q/{q[1:]}/{m['id']}.{ext}" if q else f"{base}/m/{m['id']}.{ext}"
 
 
 def _lead(post: dict) -> dict | None:
@@ -468,13 +473,22 @@ async def oembed(name: str, req: Request):
     return {"version": "1.0", "type": "link", "author_name": text, "author_url": post["url"]}
 
 
+@app.get("/m/q/{flagged}/{name}")
+async def file_flagged(flagged: str, name: str):
+    return await _serve(name, flags.parse(dict(parse_qsl(flagged, keep_blank_values=True))))
+
+
 @app.get("/m/{name}")
 async def file(name: str, req: Request):
+    # the flags in the query string: the links first handed out
+    return await _serve(name, flags.parse(req.query_params))
+
+
+async def _serve(name: str, f: flags.Flags):
     m = re.fullmatch(r"(\d{1,20})\.(mp4|png|gif)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
-    f = flags.parse(req.query_params)
     stem = _name(tid, f)
     try:
         if ext == "mp4" and _meta(stem) is None:
