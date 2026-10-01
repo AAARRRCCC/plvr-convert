@@ -48,7 +48,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
-from . import card, flags, shot, tunnel, tweet
+from . import card, flags, metrics, shard, shot, tunnel, tweet
 from . import plan as planning
 from . import resolve as rs
 from .plan import FRAG
@@ -84,11 +84,15 @@ STATUS = re.compile(r"^/(?:[A-Za-z0-9_]{1,15}|i(?:/web)?)/status(?:es)?/(\d{1,20
 @asynccontextmanager
 async def lifespan(app):
     DIR.mkdir(parents=True, exist_ok=True)
+    shard.from_env()
+    metrics.bind_jobs(lambda: len(_jobs))
+    metrics.start()
     task = asyncio.create_task(tunnel.serve())
     try:
         yield
     finally:
         task.cancel()
+        await shard.close()
 
 
 app = FastAPI(title="embed", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -129,7 +133,9 @@ def render(tid: str, f: flags.Flags) -> asyncio.Task:
     t = _jobs.get(name)
     if t is None:
         if len(_jobs) >= QUEUE:
+            metrics.render_done("busy", "unknown", 0)
             raise Busy()
+        metrics.POSTS.inc()
         t = _jobs[name] = asyncio.create_task(_render(tid, f))
         t.add_done_callback(lambda t: (_jobs.pop(name, None), t.cancelled() or t.exception()))
     return t
@@ -176,26 +182,35 @@ def _make(post: dict, f: flags.Flags) -> shot.Shot:
 
 
 async def _render(tid: str, f: flags.Flags) -> dict:
+    """_render_job, counted: how it ended, and how long it took."""
+    t0 = time.monotonic()
+    info = {"ext": "unknown"}
+    outcome = "error"
+    try:
+        meta = await _render_job(tid, f, info)
+        outcome = "ok"
+        return meta
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
+    finally:
+        metrics.render_done(outcome, info["ext"], time.monotonic() - t0)
+
+
+async def _render_job(tid: str, f: flags.Flags, info: dict) -> dict:
     t0 = time.time()
     name = _name(tid, f)
     post = await _post(tid, f)
     s = await asyncio.to_thread(_make, post, f)
     L = s.layout
     meta = _describe(tid, post, L, f)
+    info["ext"] = meta["ext"]
     try:
+        waited = time.monotonic()
         async with _slots:
-            if meta["ext"] == "gif":
-                await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
-            else:
-                # the poster is the card with each video's thumbnail drawn in: the png
-                # itself for a post without video, the preview image for one with,
-                # drawn while ffmpeg runs since Discord only waits on the mp4
-                poster = asyncio.to_thread(card.render, L, False)
-                if L.cells:
-                    png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
-                else:
-                    png = await poster
-                _write(DIR / f"{name}.png", png)
+            metrics.RENDER_WAIT_SECONDS.observe(time.monotonic() - waited)
+            with metrics.running():
+                await _make_files(s, L, post, f, meta, name)
     except asyncio.CancelledError:
         log.info("cancelled %s%s after %.1fs", tid, f.query(), time.time() - t0)
         try:
@@ -207,6 +222,21 @@ async def _render(tid: str, f: flags.Flags) -> dict:
     log.info("rendered %s%s %s %dx%d in %.1fs", tid, f.query(), meta["ext"], meta["width"], meta["height"], time.time() - t0)
     await asyncio.to_thread(_prune)
     return meta
+
+
+async def _make_files(s: shot.Shot, L: card.Layout, post: dict, f: flags.Flags, meta: dict, name: str) -> None:
+    if meta["ext"] == "gif":
+        await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
+    else:
+        # the poster is the card with each video's thumbnail drawn in: the png
+        # itself for a post without video, the preview image for one with,
+        # drawn while ffmpeg runs since Discord only waits on the mp4
+        poster = asyncio.to_thread(card.render, L, False)
+        if L.cells:
+            png, _ = await asyncio.gather(poster, _mp4(s, DIR / f"{name}.mp4"))
+        else:
+            png = await poster
+        _write(DIR / f"{name}.png", png)
 
 
 def _lone_gif(post: dict, f: flags.Flags) -> dict | None:
@@ -462,6 +492,8 @@ async def oembed(name: str, req: Request):
     m = re.fullmatch(r"(\d{1,20})\.json", name)
     if not m:
         return Response(status_code=404)
+    if (r := await _pass(req, "oembed", m.group(1))):
+        return r
     try:
         post = await _post(m.group(1), flags.parse(req.query_params))
     except rs.ResolveError as e:
@@ -475,28 +507,50 @@ async def oembed(name: str, req: Request):
 
 
 @app.get("/m/q/{flagged}/{name}")
-async def file_flagged(flagged: str, name: str):
-    return await _serve(name, flags.parse(dict(parse_qsl(flagged, keep_blank_values=True))))
+async def file_flagged(flagged: str, name: str, req: Request):
+    return await _serve(name, flags.parse(dict(parse_qsl(flagged, keep_blank_values=True))), req)
 
 
 @app.get("/m/{name}")
 async def file(name: str, req: Request):
     # the flags in the query string: the links first handed out
-    return await _serve(name, flags.parse(req.query_params))
+    return await _serve(name, flags.parse(req.query_params), req)
 
 
-async def _serve(name: str, f: flags.Flags):
+async def _pass(req: Request, route: str, tid: str):
+    """Count a request that is not a copy's own forwarding, then hand it to the
+    copy that owns the post, if that isn't this one: its answer, or None."""
+    if not req.headers.get(shard.PROXIED):
+        ua = req.headers.get("user-agent", "")
+        metrics.file_request(route, _host(req), req.cookies, ua, bool(DISCORD.search(ua) or BOTS.search(ua)))
+    return await shard.forward(req, tid)
+
+
+async def _timed(gen, t0: float):
+    """A stream, with the time to its first chunk counted."""
+    first = True
+    async for chunk in gen:
+        if first:
+            first = False
+            metrics.MP4_FIRST_BYTE.observe(time.monotonic() - t0)
+        yield chunk
+
+
+async def _serve(name: str, f: flags.Flags, req: Request):
     m = re.fullmatch(r"(\d{1,20})\.(mp4|png|gif)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
+    if (r := await _pass(req, "media", tid)):
+        return r
+    t0 = time.monotonic()
     stem = _name(tid, f)
     try:
         if ext == "mp4" and _meta(stem) is None:
             job = render(tid, f)
             if (await _layout_ext(tid, f)) == "mp4":
                 log.info("streaming %s%s mid-render", tid, f.query())
-                return StreamingResponse(_tail(DIR / f"{stem}.mp4", job), media_type="video/mp4", headers={"Cache-Control": "no-store"})
+                return StreamingResponse(_timed(_tail(DIR / f"{stem}.mp4", job), t0), media_type="video/mp4", headers={"Cache-Control": "no-store"})
         meta = await media(tid, f)
     except Busy:
         return Response(status_code=503, headers={"Retry-After": "30"})
@@ -531,12 +585,14 @@ def _activity(req: Request, tid: str, post: dict) -> str:
 
 
 @app.get("/api/v1/statuses/{tid}")
-async def status(tid: str):
+async def status(tid: str, req: Request):
     """The lone gif as a Mastodon status with a gifv attachment: x.com's own
     mp4 of it, which Discord loops like a gif. The request carries only the id,
     so the flags are the ones the page fetch just before it came with."""
     if not re.fullmatch(r"\d{1,20}", tid):
         return JSONResponse({"error": "Record not found"}, status_code=404)
+    if (r := await _pass(req, "status", tid)):
+        return r
     at, f = _gif_flags.get(tid, (0.0, flags.Flags(media=True)))
     if time.time() - at > 600:
         f = flags.Flags(media=True)
@@ -634,6 +690,15 @@ def _draw_help(text: str) -> bytes:
     return out.getvalue()
 
 
+@app.get("/me")
+async def me(req: Request):
+    """Leave this browser's clicks out of the counts. The cookie is per domain
+    and only hides your own requests, so it needs no secret."""
+    r = PlainTextResponse("this browser is now excluded from the counts\n", headers={"Cache-Control": "no-store"})
+    r.set_cookie(metrics.ME_COOKIE, "1", max_age=metrics.ME_MAX_AGE, path="/", httponly=True, secure=True, samesite="lax")
+    return r
+
+
 @app.get("/{path:path}")
 async def post(path: str, req: Request):
     ua = req.headers.get("user-agent", "")
@@ -641,11 +706,16 @@ async def post(path: str, req: Request):
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
     bot = discord or bool(BOTS.search(ua))
+    if not req.headers.get(shard.PROXIED):
+        kind = "other" if not m else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
+        metrics.request(kind, _host(req), req.cookies, ua)
     if f.help or req.url.path.rstrip("/") == "/help":
         if bot:
             return _card(req, "embed flags", f"Swap x.com for {_host(req)} in a post link, then add flags after ? joined by &. "
                                              f"The whole guide is in the image, and as text at {_base(req)}/help", f"{_base(req)}/help.png?v={VERSION}")
         return PlainTextResponse(_help_text(req), headers={"Cache-Control": "no-store"})
+    if m and (f.cancel or bot or f.raw) and (r := await shard.forward(req, m.group(1))):
+        return r
     if m and f.cancel:
         tid = m.group(1)
         n = cancel(tid)
