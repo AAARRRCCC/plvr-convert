@@ -20,6 +20,7 @@ flag with a value it can't read.
     lines        cut the text after this many lines, with "Show more"
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
     plain        a video post goes out as x.com's own file, not the render
+    render       render a video over embed.LONG_VIDEO anyway, up to embed.MAX_FORCED
     raw          every visitor, a browser too, is sent to the rendered file
                  (or to x.com's own file, for a video too long to render)
     cancel       stop every render of this post that is still running
@@ -43,7 +44,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -89,6 +90,7 @@ LOOK
 TIMING
   start=1:30&end=1:45   clip the video (90, 1:30 and 1m30s all work)
                         over {long}s goes out as x.com's own video; a shorter clip renders
+  render          render it anyway, up to {forced}
 
 OTHER
   plain           x.com's own video instead of the render
@@ -111,6 +113,7 @@ class Flags:
     end: float | None = None
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
     plain: bool = False
+    render: bool = False   # how the page is answered, not what is drawn: left out of query()
     raw: bool = False
     cancel: bool = False
     help: bool = False
@@ -187,7 +190,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "raw", "cancel", "media", "help", "quote") and _bool(v) is not None:
+        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "quote") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

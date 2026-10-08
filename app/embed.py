@@ -19,7 +19,8 @@ once. Discord reads the whole file before it shows the preview and gives up
 after about ten seconds, so the bitrate is set to keep the file near
 TARGET_MB, and a video longer than LONG_VIDEO, which takes longer than that
 to compose, is not drawn: the post goes out as a plain embed, name, text and
-x.com's own video file.
+x.com's own video file. The render flag draws it anyway, up to MAX_FORCED;
+Discord may then cut the preview short until the render is done.
 
 Flags in the link's query string (v2=image, q=0, theme=light, start=0:30 ...)
 change the render; flags.py lists them. Each set of flags is its own render,
@@ -64,6 +65,7 @@ MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
 LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 20))  # seconds
+MAX_FORCED = float(os.environ.get("MAX_FORCED", 180))  # seconds: the longest the render flag draws
 PRESET = os.environ.get("X264_PRESET", "superfast")
 # Discord downloads the whole video while it builds the preview and gives up
 # after about ten seconds, so the file is held to a size the house uplink
@@ -586,9 +588,10 @@ def _activity(req: Request, tid: str, post: dict) -> str:
 
 @app.get("/api/v1/statuses/{tid}")
 async def status(tid: str, req: Request):
-    """The lone gif as a Mastodon status with a gifv attachment: x.com's own
-    mp4 of it, which Discord loops like a gif. The request carries only the id,
-    so the flags are the ones the page fetch just before it came with."""
+    """The lone gif as a Mastodon status whose attachment is an image: the real
+    .gif rendered here, which Discord shows as a gif (a gifv, x.com's own mp4,
+    it shows as a video). The request carries only the id, so the flags are
+    the ones the page fetch just before it came with."""
     if not re.fullmatch(r"\d{1,20}", tid):
         return JSONResponse({"error": "Record not found"}, status_code=404)
     if (r := await _pass(req, "status", tid)):
@@ -603,13 +606,20 @@ async def status(tid: str, req: Request):
     g = _lone_gif(post, f)
     if g is None:
         return JSONResponse({"error": "Record not found"}, status_code=404)
+    try:
+        # Discord's image fetch comes right after this; it waits on the render
+        render(tid, f)
+    except Busy:
+        pass
+    w, h = _gif_size(g)
     created = datetime.fromtimestamp(post["created"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     return {
         "id": tid, "url": post["url"], "uri": post["url"], "created_at": created, "edited_at": None,
         "content": "", "spoiler_text": "", "sensitive": False, "visibility": "public", "language": None,
         "in_reply_to_id": None, "in_reply_to_account_id": None, "reblog": None, "application": {"name": None, "website": None},
-        "media_attachments": [{"id": "0", "type": "gifv", "url": g["url"], "preview_url": g.get("poster") or g["url"], "remote_url": None,
-                               "description": None, "meta": {"original": {"width": g["w"], "height": g["h"]}}}],
+        "media_attachments": [{"id": "0", "type": "image", "url": _file(_base(req), {"id": tid, "query": f.query()}, "gif"), "preview_url": None,
+                               "remote_url": None, "description": None,
+                               "meta": {"original": {"width": w, "height": h, "size": f"{w}x{h}", "aspect": w / h}}}],
         "mentions": [], "tags": [], "emojis": [],
         "account": {
             "id": post["handle"], "username": post["handle"], "acct": post["handle"], "display_name": post["name"],
@@ -625,7 +635,11 @@ def _host(req: Request) -> str:
 
 
 def _help_text(req: Request) -> str:
-    return flags.HELP.format(host=_host(req), long=f"{LONG_VIDEO:g}")
+    return flags.HELP.format(host=_host(req), long=f"{LONG_VIDEO:g}", forced=_span(MAX_FORCED))
+
+
+def _span(s: float) -> str:
+    return f"{s / 60:g} min" if s >= 60 else f"{s:g}s"
 
 
 def _card(req: Request, title: str, text: str, image: str | None = None) -> HTMLResponse:
@@ -747,7 +761,7 @@ async def post(path: str, req: Request):
         if meta is None or f.plain:
             post_ = await _post(tid, f)
             lead = _lead(post_)
-            if lead and (f.plain or _length(lead, f) > LONG_VIDEO):
+            if lead and (f.plain or _length(lead, f) > (MAX_FORCED if f.render else LONG_VIDEO)):
                 # too long to render: x.com's own file, or a plain embed of it
                 if f.raw or f.media and discord:
                     return RedirectResponse(lead["url"], status_code=302)
