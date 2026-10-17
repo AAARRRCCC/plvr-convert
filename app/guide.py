@@ -37,7 +37,7 @@ class Page:
     path: str
     title: str             # the chat app's embed title
     blurb: str             # and its description
-    intro: str
+    intro: str             # "" for none, and no example either
     example: str
     heading: str           # the table's
     items: list[Item]
@@ -63,9 +63,8 @@ HELP = Page(
 )
 
 WORKFLOWS = Page(
-    "workflows", "embed workflows", "Flag combos for {host}. Every flag: {host}/help",
-    "Put these on the end of a post link",
-    "{host}/user/status/123?quote&media",
+    "workflows", "embed workflows", "secret super awesomeyurisex dot com combo moves !! :3",
+    "", "",
     "Combos",
     _items(("?quote&q=0&media&v1=hide", "2nd video of the quoted post"), ("?quote&q=0&media", "the quoted post's video"),
            ("?v2=sound", "post's video, quote's sound"), ("?v=image", "a still, no video"), ("?q=0", "drop the quote"),
@@ -89,7 +88,8 @@ def _fill(p: Page, v: dict) -> Page:
 def text(page: Page, **v) -> str:
     p = _fill(page, v)
     rows = [f"  {i.chip:<26} {i.words}" for i in p.items]
-    return "\n".join([f"{v['host']} {p.title}", "", p.intro, f"    {p.example}", "", p.heading.upper(), *rows, "",
+    intro = [p.intro, f"    {p.example}", ""] if p.intro else []
+    return "\n".join([f"{v['host']} {p.title}", "", *intro, p.heading.upper(), *rows, "",
                       f"{p.more[0]} {p.more[1]}", ""])
 
 
@@ -116,6 +116,7 @@ td.tcat{background:linear-gradient(#ec5e95,#b51b52);color:#fff;font-weight:bold;
 td.flag{border-right:1px solid #f2c4d6;white-space:nowrap;width:1%}
 code{font:bold 11px "Courier New","DejaVu Sans Mono",monospace;color:#b0003a}
 .codebox code{color:#8a1538}
+.gap{height:12px}
 .more{text-align:center;margin:12px 10px 10px}
 @media (max-width:420px){td.flag{white-space:normal}}
 """
@@ -133,7 +134,7 @@ def page_html(page: Page, **v) -> str:
 <style>{CSS}</style></head>
 <body><div id="wrap">
 <div id="head"><img src="/guide/teto.png" alt="Kasane Teto with a baguette"><h1>{e(v['host'])}<span class="beta">BETA</span></h1></div>
-<div class="intro">{e(p.intro)}<br><span class="codebox"><code>{e(p.example)}</code></span></div>
+{f'<div class="intro">{e(p.intro)}<br><span class="codebox"><code>{e(p.example)}</code></span></div>' if p.intro else '<div class="gap"></div>'}
 <table><tr><td class="tcat" colspan=2>{e(p.heading)}</td></tr>{rows}</table>
 <div class="more"><b>{e(words)}</b> <a href="/{e(link.split("/", 1)[-1])}">{e(link)}</a></div>
 </div></body></html>"""
@@ -303,9 +304,10 @@ def _layout(c: _Canvas, p: Page, host: str) -> int:
     c.line((x0, y0 + head - 1, right - 1, y0 + head - 1), "#7a0f35")
     y = y0 + head + 12
     # how, and an example
-    _centred(c, y, p.intro, _f("bold"), C["text"])
-    y += LH + 5
-    y += c.code(mid, y, p.example) + 12
+    if p.intro:
+        _centred(c, y, p.intro, _f("bold"), C["text"])
+        y += LH + 5
+        y += c.code(mid, y, p.example) + 12
     # the table
     y += _table(c, x0 + GUT, y, PAGE_W - 2 * GUT, p.heading, p.items) + 12
     # the other page
