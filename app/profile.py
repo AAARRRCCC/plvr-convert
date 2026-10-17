@@ -15,7 +15,7 @@ from . import card
 
 POSTS = int(os.environ.get("PROFILE_POSTS", 6))
 RECENT_FROM = 60     # timeline entries read for the latest, reposts dropped
-TOP_FROM = 100       # and for top, which picks the most liked of them
+TOP_FROM = 60        # and for top, which picks the most liked of them
 LINES = 10           # a post's text is cut here, with "Show more"
 COLS = 2
 BANNER = 180         # css px

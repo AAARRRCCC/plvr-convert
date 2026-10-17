@@ -50,7 +50,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `plain` | | a video post goes out as x.com's own file |
 | `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |
 | `cancel` | | stops every running render of the post, ffmpeg included |
-| `top` | | on a profile: the most liked of their last 100 timeline entries, not the latest |
+| `top` | | on a profile: the most liked of their last 60 timeline entries, not the latest |
 | `help` | | the guide instead of the post (`/help` too) |
 | `workflows` | | the guide's combos page instead of the post (`/workflows` too) |
 
