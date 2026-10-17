@@ -164,6 +164,22 @@ def test_timeline_reads_pages_and_keeps_own_posts(monkeypatch):
     assert [p["id"] for p in got["posts"]] == ["5"] and asked == [None]
 
 
+def test_timeline_asks_again_after_a_false_404(monkeypatch):
+    misses = {"profile": 2, "statuses": 1}
+
+    async def api(url, what):
+        kind = "statuses" if "/2/profile/" in url else "profile"
+        if misses[kind]:
+            misses[kind] -= 1
+            raise tweet.Missing("that account doesn't exist, or was deleted")
+        if kind == "profile":
+            return {"code": 200, "user": {"screen_name": "Flaky", "name": "Flaky"}}
+        return {"code": 200, "results": [{"id": "1", "author": {"screen_name": "Flaky"}, "text": "hi"}], "cursor": {}}
+    monkeypatch.setattr(tweet, "_api", api)
+    got = asyncio.run(tweet.timeline("Flaky", 20))
+    assert [p["id"] for p in got["posts"]] == ["1"] and misses == {"profile": 0, "statuses": 0}
+
+
 def test_private_account(monkeypatch):
     async def api(url, what):
         return {"code": 200, "user": {"screen_name": "Locked", "protected": True}}

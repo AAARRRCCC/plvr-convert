@@ -48,6 +48,10 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
+class Missing(rs.ResolveError):
+    pass
+
+
 async def _api(url: str, what: str) -> dict:
     """fxtwitter's answer, its failures told about `what` was asked for."""
     try:
@@ -55,7 +59,7 @@ async def _api(url: str, what: str) -> dict:
     except httpx.HTTPError as e:
         raise rs.ResolveError("x.com couldn't be reached right now") from e
     if r.status_code == 404:
-        raise rs.ResolveError(f"that {what} doesn't exist, or was deleted")
+        raise Missing(f"that {what} doesn't exist, or was deleted")
     if r.status_code in (401, 403):
         raise rs.ResolveError(f"that {what} is private")
     if r.status_code == 429:
@@ -69,8 +73,21 @@ async def _api(url: str, what: str) -> dict:
     if j.get("code") == 401:
         raise rs.ResolveError(f"that {what} is private")
     if j.get("code") == 404:
-        raise rs.ResolveError(f"that {what} doesn't exist, or was deleted")
+        raise Missing(f"that {what} doesn't exist, or was deleted")
     return j
+
+
+async def _api_again(url: str, what: str, tries: int = 3) -> dict:
+    """_api, asked again when it says there's nothing there: fxtwitter's
+    profile and timeline answer 404 for an account that exists about one
+    time in five."""
+    for n in range(tries):
+        try:
+            return await _api(url, what)
+        except Missing:
+            if n == tries - 1:
+                raise
+            await asyncio.sleep(0.3)
 
 
 async def _fetch_raw(tid: str, lang: str | None = None) -> dict:
@@ -129,8 +146,8 @@ async def timeline(handle: str, scan: int, want: int | None = None) -> dict:
 
 async def _timeline(handle: str, scan: int, want: int | None, key: str) -> dict:
     t0 = time.time()
-    u, page = await asyncio.gather(_api(PROFILE.format(handle=handle), "account"),
-                                   _api(STATUSES.format(handle=handle), "account"), return_exceptions=True)
+    u, page = await asyncio.gather(_api_again(PROFILE.format(handle=handle), "account"),
+                                   _api_again(STATUSES.format(handle=handle), "account"), return_exceptions=True)
     if isinstance(u, BaseException):
         raise u
     user = u.get("user") or {}
@@ -156,7 +173,7 @@ async def _timeline(handle: str, scan: int, want: int | None, key: str) -> dict:
         if not results or not cursor or seen >= scan or want and len(posts) >= want:
             break
         try:
-            page = await _api(STATUSES.format(handle=handle) + f"&cursor={quote(cursor)}", "account")
+            page = await _api_again(STATUSES.format(handle=handle) + f"&cursor={quote(cursor)}", "account")
         except rs.ResolveError:
             if not posts:
                 raise
