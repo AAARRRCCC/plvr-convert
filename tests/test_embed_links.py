@@ -62,7 +62,9 @@ def test_guide_images_and_font():
     for page in ("help", "workflows"):
         r = c.get(f"/{page}.png")
         assert r.status_code == 200 and r.content.startswith(b"\x89PNG\r\n\x1a\n")
-    assert c.get("/guide/nunito.ttf").headers["content-type"] == "font/ttf"
+    assert c.get("/guide/silkscreen.ttf").headers["content-type"] == "font/ttf"
+    assert c.get("/guide/teto.png").content.startswith(b"\x89PNG")
+    assert c.get("/guide/guide.py").status_code == 404
 
 
 def test_every_flag_is_in_the_help():

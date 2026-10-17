@@ -710,9 +710,12 @@ async def guide_png(req: Request):
     return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
 
-@app.get("/guide/nunito.ttf")
-async def guide_font():
-    return FileResponse(guide.FONT, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
+@app.get("/guide/{name}")
+async def guide_file(name: str):
+    if name not in guide.FILES:
+        return Response(status_code=404)
+    path, kind = guide.FILES[name]
+    return FileResponse(path, media_type=kind, headers={"Cache-Control": "public, max-age=86400"})
 
 
 async def _profile(req: Request, handle: str, f: flags.Flags, discord: bool):
