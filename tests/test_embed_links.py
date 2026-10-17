@@ -182,6 +182,15 @@ def test_timeline_asks_again_after_a_false_404(monkeypatch):
     assert [p["id"] for p in got["posts"]] == ["1"] and misses == {"profile": 0, "statuses": 0}
 
 
+def test_a_timeline_post_reads_like_a_single_one():
+    # the timeline's reply is an object and its retweets are reposts
+    p = tweet._normalize({"id": "1", "author": {"screen_name": "a"}, "text": "hi", "reposts": 7,
+                          "replying_to": {"screen_name": "b", "status": "2", "url": "https://x.com/b/status/2"}})
+    assert p["replying_to"] == "b" and p["reposts"] == 7
+    p = tweet._normalize({"id": "1", "author": {"screen_name": "a"}, "text": "hi", "retweets": 3, "replying_to": "c"})
+    assert p["replying_to"] == "c" and p["reposts"] == 3
+
+
 def test_private_account(monkeypatch):
     async def api(url, what):
         return {"code": 200, "user": {"screen_name": "Locked", "protected": True}}

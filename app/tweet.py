@@ -301,6 +301,11 @@ def _normalize(raw: dict) -> dict:
             created = datetime.strptime(raw.get("created_at", ""), "%a %b %d %H:%M:%S %z %Y").timestamp()
         except ValueError:
             created = time.time()
+    # the timeline names a few things differently from a single post: the
+    # reply is an object there, a screen name here, and retweets are reposts
+    reply = raw.get("replying_to")
+    if isinstance(reply, dict):
+        reply = reply.get("screen_name")
     tr = raw.get("translation") or {}
     spans = _spans(raw)
     translated = None
@@ -321,11 +326,11 @@ def _normalize(raw: dict) -> dict:
         "translated": translated,     # the language it was translated from, or None
         "created": float(created),
         "replies": int(raw.get("replies") or 0),
-        "reposts": int(raw.get("retweets") or 0),
+        "reposts": int(raw.get("retweets") or raw.get("reposts") or 0),
         "likes": int(raw.get("likes") or 0),
         "views": int(raw.get("views") or 0) if raw.get("views") is not None else None,
         "bookmarks": int(raw.get("bookmarks") or 0),
-        "replying_to": raw.get("replying_to"),
+        "replying_to": reply or None,
         "media": _media(raw),
         "quote": None,
     }
