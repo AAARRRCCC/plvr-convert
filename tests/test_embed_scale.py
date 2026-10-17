@@ -132,8 +132,8 @@ def fake_owner(log: dict):
                 log["endless_closed"] = True
         return StreamingResponse(chunks(), media_type="video/mp4")
 
-    @app.get("/api/v1/statuses/{tid}")
-    async def status(tid: str, req: Request):
+    @app.get("/o/{name}")
+    async def oembed(name: str, req: Request):
         log.setdefault("hits", []).append(dict(req.headers))
         return JSONResponse({"error": "from the owner"}, status_code=418, headers={"X-Owner": "yes"})
 
@@ -177,7 +177,7 @@ def test_proxy_streams_and_passes_status_and_headers(pair):
 
 def test_proxy_passes_status_headers_and_body(pair):
     front, owner, log = pair
-    r = httpx.get(f"{front.url}/api/v1/statuses/{EVEN}")
+    r = httpx.get(f"{front.url}/o/{EVEN}.json")
     assert r.status_code == 418 and r.headers["x-owner"] == "yes" and r.json() == {"error": "from the owner"}
 
 
@@ -206,7 +206,7 @@ def test_owned_post_is_not_proxied(pair, monkeypatch):
     async def post(tid, f):
         raise rs.ResolveError("here")
     monkeypatch.setattr(embed, "_post", post)
-    r = httpx.get(f"{front.url}/api/v1/statuses/{ODD}")      # odd: copy 1 owns it
+    r = httpx.get(f"{front.url}/o/{ODD}.json")      # odd: copy 1 owns it
     assert r.status_code == 404 and r.json() == {"error": "here"}
     assert "hits" not in log
 
@@ -217,7 +217,7 @@ def test_proxied_request_is_never_proxied_again(pair, monkeypatch):
     async def post(tid, f):
         raise rs.ResolveError("here")
     monkeypatch.setattr(embed, "_post", post)
-    r = httpx.get(f"{front.url}/api/v1/statuses/{EVEN}", headers={shard.PROXIED: "0"})
+    r = httpx.get(f"{front.url}/o/{EVEN}.json", headers={shard.PROXIED: "0"})
     assert r.json() == {"error": "here"}          # served by the copy that got it, not the owner
     assert "hits" not in log
 
@@ -231,7 +231,7 @@ def test_unreachable_owner_is_served_locally(monkeypatch):
     before = sample("embed_proxied_total", result="fallback_local")
     with Live(embed.app) as front:
         t0 = time.time()
-        r = httpx.get(f"{front.url}/api/v1/statuses/{EVEN}")
+        r = httpx.get(f"{front.url}/o/{EVEN}.json")
     assert r.status_code == 404 and r.json() == {"error": "here"}
     assert time.time() - t0 < 2
     assert sample("embed_proxied_total", result="fallback_local") == before + 1
@@ -244,7 +244,7 @@ def test_unresolvable_owner_is_served_locally(monkeypatch):
         raise rs.ResolveError("here")
     monkeypatch.setattr(embed, "_post", post)
     with Live(embed.app) as front:
-        r = httpx.get(f"{front.url}/api/v1/statuses/{EVEN}", timeout=10)
+        r = httpx.get(f"{front.url}/o/{EVEN}.json", timeout=10)
     assert r.json() == {"error": "here"}
 
 

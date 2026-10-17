@@ -28,13 +28,23 @@ kept under the post's id plus a hash of the flags, and its files are linked
 with the same flags in their query string, so a file request that comes
 before the render can start it.
 
-Renders are kept on disk for RENDER_TTL. Run with
+A post whose only media is a gif, linked with the media flag, sends Discord
+straight to the gif itself, as an animated webp: a link to an image is shown
+as the image alone, the link hidden, the way a gif host's link is.
+
+A profile link, https://<this host>/<user>, gets the same treatment with an
+image of the profile: its header and several of the user's own posts
+(profile.py), or with top their most liked. /help and /workflows are the
+guide (guide.py): an image for a chat app, a page for a browser.
+
+Renders are kept on disk for RENDER_TTL, a profile's for PROFILE_TTL. Run with
 
     uvicorn app.embed:app
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -43,13 +53,12 @@ import re
 import time
 from urllib.parse import parse_qsl
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
-from . import card, flags, metrics, shard, shot, tunnel, tweet
+from . import card, flags, guide, metrics, profile, shard, shot, tunnel, tweet
 from . import plan as planning
 from . import resolve as rs
 from .plan import FRAG
@@ -61,6 +70,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 VERSION = os.environ.get("APP_VERSION", "dev")
 DIR = Path(os.environ.get("EMBED_DIR", "/tmp/embed"))
 RENDER_TTL = int(os.environ.get("RENDER_TTL", 3600))
+PROFILE_TTL = int(os.environ.get("PROFILE_TTL", 600))   # a profile's latest posts go stale sooner
 MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
@@ -81,6 +91,10 @@ GIF_WIDTH = int(os.environ.get("GIF_WIDTH", 720))    # a real gif is scaled down
 DISCORD = re.compile(r"Discordbot|rv:38\.0\) Gecko/20100101 Firefox/38\.0|rv:92\.0\) Gecko/20100101 Firefox/92\.0")
 BOTS = re.compile(r"bot\b|bot/|crawler|spider|facebookexternalhit|whatsapp|telegram|slack|skype|embedly|iframely|mastodon|cardyb|bluesky|vkshare|pinterest|preview", re.I)
 STATUS = re.compile(r"^/(?:[A-Za-z0-9_]{1,15}|i(?:/web)?)/status(?:es)?/(\d{1,20})(?:/.*)?$")
+USER = re.compile(r"^/([A-Za-z0-9_]{1,15})/?$")
+# top-level paths on x.com, and here, that aren't anyone's profile
+RESERVED = {"help", "workflows", "me", "healthz", "metrics", "home", "explore", "search", "notifications", "messages", "settings",
+            "i", "compose", "login", "logout", "signup", "tos", "privacy", "about", "jobs", "hashtag", "intent", "share"}
 
 
 @asynccontextmanager
@@ -114,11 +128,11 @@ _jobs: dict[str, asyncio.Task] = {}
 _slots = asyncio.Semaphore(RENDERS)
 
 
-def _meta(name: str) -> dict | None:
+def _meta(name: str, ttl: int = RENDER_TTL) -> dict | None:
     """The finished render's description, if there is a fresh one on disk."""
     p = DIR / f"{name}.json"
     try:
-        if time.time() - p.stat().st_mtime > RENDER_TTL:
+        if time.time() - p.stat().st_mtime > ttl:
             return None
         return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -129,16 +143,28 @@ def _name(tid: str, f: flags.Flags) -> str:
     return tid + f.key()
 
 
+def _pname(handle: str, f: flags.Flags) -> str:
+    """A profile render's name: never all digits, so never a post's."""
+    return f"u_{handle.lower()}{f.key()}"
+
+
 def render(tid: str, f: flags.Flags) -> asyncio.Task:
     """The render of one post with these flags, started if it isn't already running."""
-    name = _name(tid, f)
+    return _start(_name(tid, f), lambda info: _render_job(tid, f, info))
+
+
+def render_profile(handle: str, f: flags.Flags) -> asyncio.Task:
+    return _start(_pname(handle, f), lambda info: _profile_job(handle, f, info))
+
+
+def _start(name: str, job) -> asyncio.Task:
     t = _jobs.get(name)
     if t is None:
         if len(_jobs) >= QUEUE:
             metrics.render_done("busy", "unknown", 0)
             raise Busy()
         metrics.POSTS.inc()
-        t = _jobs[name] = asyncio.create_task(_render(tid, f))
+        t = _jobs[name] = asyncio.create_task(_counted(job))
         t.add_done_callback(lambda t: (_jobs.pop(name, None), t.cancelled() or t.exception()))
     return t
 
@@ -152,10 +178,19 @@ def cancel(tid: str) -> int:
 
 
 async def media(tid: str, f: flags.Flags) -> dict:
-    m = _meta(_name(tid, f))
+    return await _finished(_meta(_name(tid, f)), lambda: render(tid, f))
+
+
+async def profile_media(handle: str, f: flags.Flags) -> dict:
+    return await _finished(_meta(_pname(handle, f), PROFILE_TTL), lambda: render_profile(handle, f))
+
+
+async def _finished(m: dict | None, start) -> dict:
+    """The render's description: `m` if it is already on disk, else once the
+    render `start` hands back is done."""
     if m is not None:
         return m
-    t = render(tid, f)
+    t = start()
     try:
         return await asyncio.shield(t)
     except asyncio.CancelledError:
@@ -183,13 +218,13 @@ def _make(post: dict, f: flags.Flags) -> shot.Shot:
     return shot.make(post, dict(planning.DEFAULTS, mode="shot", shot_stats=f.stats), f.lines or FULL, f.theme, f.start, f.end, f.media)
 
 
-async def _render(tid: str, f: flags.Flags) -> dict:
-    """_render_job, counted: how it ended, and how long it took."""
+async def _counted(job) -> dict:
+    """A render job, counted: how it ended, and how long it took."""
     t0 = time.monotonic()
     info = {"ext": "unknown"}
     outcome = "error"
     try:
-        meta = await _render_job(tid, f, info)
+        meta = await job(info)
         outcome = "ok"
         return meta
     except asyncio.CancelledError:
@@ -226,9 +261,41 @@ async def _render_job(tid: str, f: flags.Flags, info: dict) -> dict:
     return meta
 
 
+async def _profile_board(handle: str, f: flags.Flags) -> tuple[profile.Board, dict]:
+    """The profile as the flags have it, laid out, and what its tags need."""
+    if f.top:
+        data = await tweet.timeline(handle, profile.TOP_FROM)
+    else:
+        data = await tweet.timeline(handle, profile.RECENT_FROM, profile.POSTS)
+    u, posts = data["user"], profile.pick(data["posts"], f.top)
+    b = await asyncio.to_thread(profile.layout, u, posts, f.theme, f.stats, f.lines or profile.LINES, min(1, f.depth), f.top, len(data["posts"]))
+    meta = {"id": f"u_{handle.lower()}", "url": u["url"], "name": u["name"], "handle": u["handle"], "text": tweet.plain_text({"spans": u["bio"]}),
+            "width": b.width, "height": b.height, "ext": "png", "query": f.query()}
+    return b, meta
+
+
+async def _profile_job(handle: str, f: flags.Flags, info: dict) -> dict:
+    t0 = time.time()
+    name = _pname(handle, f)
+    b, meta = await _profile_board(handle, f)
+    info["ext"] = "png"
+    async with _slots:
+        with metrics.running():
+            png = await asyncio.to_thread(profile.render, b)
+    _write(DIR / f"{name}.png", png)
+    _write(DIR / f"{name}.json", json.dumps(meta).encode())
+    log.info("rendered @%s%s %dx%d in %.1fs", handle, f.query(), b.width, b.height, time.time() - t0)
+    await asyncio.to_thread(_prune)
+    return meta
+
+
 async def _make_files(s: shot.Shot, L: card.Layout, post: dict, f: flags.Flags, meta: dict, name: str) -> None:
     if meta["ext"] == "gif":
-        await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
+        # the gif, and the same as an animated webp for Discord
+        g = _lone_gif(post, f)
+        for r in await asyncio.gather(_anim(g, DIR / f"{name}.gif", f), _anim(g, DIR / f"{name}.webp", f), return_exceptions=True):
+            if isinstance(r, BaseException):
+                raise r
     else:
         # the poster is the card with each video's thumbnail drawn in: the png
         # itself for a post without video, the preview image for one with,
@@ -260,9 +327,10 @@ def _gif_size(item: dict) -> tuple[int, int]:
     return w, h + h % 2
 
 
-async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
-    """x.com's mp4 of a gif, back into a gif: its own frames at its own size
-    (down to GIF_WIDTH), through a palette made from those frames, looping."""
+async def _anim(item: dict, dest: Path, f: flags.Flags) -> None:
+    """x.com's mp4 of a gif, back into a gif (or a webp, by dest's suffix):
+    its own frames at its own size (down to GIF_WIDTH), looping; a gif's
+    colours come from a palette made from those frames."""
     rs.assert_public(item["url"])
     w, _ = _gif_size(item)
     argv = [shot.FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
@@ -272,8 +340,11 @@ async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
     if f.end:
         argv += ["-t", f"{f.end - f.start:.3f}"]
     tmp = dest.with_name(dest.name + ".tmp")
-    argv += ["-vf", f"scale={w}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
-             "-loop", "0", "-f", "gif", str(tmp)]
+    if dest.suffix == ".webp":
+        argv += ["-vf", f"scale={w}:-2:flags=lanczos", "-an", "-c:v", "libwebp_anim", "-quality", "80", "-loop", "0", "-f", "webp", str(tmp)]
+    else:
+        argv += ["-vf", f"scale={w}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
+                 "-loop", "0", "-f", "gif", str(tmp)]
     proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(), RENDER_TIMEOUT)
@@ -538,13 +609,21 @@ async def _timed(gen, t0: float):
         yield chunk
 
 
+def _owner_key(rid: str) -> str:
+    """The number a render's copy is picked by: a post's id, or for a profile
+    (u_<handle>) one made from the handle."""
+    return rid if rid.isdigit() else str(int(hashlib.sha1(rid.lower().encode()).hexdigest()[:12], 16))
+
+
 async def _serve(name: str, f: flags.Flags, req: Request):
-    m = re.fullmatch(r"(\d{1,20})\.(mp4|png|gif)", name)
+    m = re.fullmatch(r"(\d{1,20}|u_[A-Za-z0-9_]{1,15})\.(mp4|png|gif|webp)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
-    if (r := await _pass(req, "media", tid)):
+    if (r := await _pass(req, "media", _owner_key(tid))):
         return r
+    if not tid.isdigit():
+        return await _serve_profile(tid[2:], ext, f)
     t0 = time.monotonic()
     stem = _name(tid, f)
     try:
@@ -560,89 +639,40 @@ async def _serve(name: str, f: flags.Flags, req: Request):
         return JSONResponse({"error": "the render was cancelled"}, status_code=410)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
-    if ext != "png" and meta["ext"] != ext or ext == "png" and meta["ext"] == "gif":
+    # the files each kind of render leaves: an mp4 has its poster png too
+    if ext not in {"mp4": ("mp4", "png"), "png": ("png",), "gif": ("gif", "webp")}[meta["ext"]]:
         return Response(status_code=404)
-    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif"}.get(ext, "image/png"),
+    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png"),
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 
-_cancelled: dict[str, tuple[float, int]] = {}
-_gif_flags: dict[str, tuple[float, flags.Flags]] = {}   # post id -> the flags Discord's page fetch came with
-
-
-def _activity(req: Request, tid: str, post: dict) -> str:
-    """Discord's page for a lone gif: a link that makes it read the post as a
-    Mastodon status, the one way it shows a linked gif as a gif (looping, and
-    savable to its gif favourites) rather than as a still or a video."""
-    e = lambda s: html.escape(str(s), quote=True)
-    title = f"{post['name']} (@{post['handle']})"
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8">
-<title>{e(title)}</title>
-<meta name="theme-color" content="#000000">
-<meta property="og:title" content="{e(title)}">
-<link type="application/activity+json" href="{e(_base(req))}/users/{e(post['handle'])}/statuses/{e(tid)}">
-<meta http-equiv="refresh" content="0; url={e(post['url'])}">
-</head><body></body></html>"""
-
-
-@app.get("/api/v1/statuses/{tid}")
-async def status(tid: str, req: Request):
-    """The lone gif as a Mastodon status whose attachment is an image: the real
-    .gif rendered here, which Discord shows as a gif (a gifv, x.com's own mp4,
-    it shows as a video). The request carries only the id, so the flags are
-    the ones the page fetch just before it came with."""
-    if not re.fullmatch(r"\d{1,20}", tid):
-        return JSONResponse({"error": "Record not found"}, status_code=404)
-    if (r := await _pass(req, "status", tid)):
-        return r
-    at, f = _gif_flags.get(tid, (0.0, flags.Flags(media=True)))
-    if time.time() - at > 600:
-        f = flags.Flags(media=True)
+async def _serve_profile(handle: str, ext: str, f: flags.Flags):
+    if ext != "png":
+        return Response(status_code=404)
     try:
-        post = await _post(tid, f)
+        await profile_media(handle, f)
+    except Busy:
+        return Response(status_code=503, headers={"Retry-After": "30"})
+    except Cancelled:
+        return JSONResponse({"error": "the render was cancelled"}, status_code=410)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
-    g = _lone_gif(post, f)
-    if g is None:
-        return JSONResponse({"error": "Record not found"}, status_code=404)
-    try:
-        # Discord's image fetch comes right after this; it waits on the render
-        render(tid, f)
-    except Busy:
-        pass
-    w, h = _gif_size(g)
-    created = datetime.fromtimestamp(post["created"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    return {
-        "id": tid, "url": post["url"], "uri": post["url"], "created_at": created, "edited_at": None,
-        "content": "", "spoiler_text": "", "sensitive": False, "visibility": "public", "language": None,
-        "in_reply_to_id": None, "in_reply_to_account_id": None, "reblog": None, "application": {"name": None, "website": None},
-        "media_attachments": [{"id": "0", "type": "image", "url": _file(_base(req), {"id": tid, "query": f.query()}, "gif"), "preview_url": None,
-                               "remote_url": None, "description": None,
-                               "meta": {"original": {"width": w, "height": h, "size": f"{w}x{h}", "aspect": w / h}}}],
-        "mentions": [], "tags": [], "emojis": [],
-        "account": {
-            "id": post["handle"], "username": post["handle"], "acct": post["handle"], "display_name": post["name"],
-            "url": f"https://x.com/{post['handle']}", "uri": f"https://x.com/{post['handle']}",
-            "avatar": post["avatar"], "avatar_static": post["avatar"], "locked": False, "bot": False, "emojis": [], "fields": [],
-        },
-    }
-_help_png: dict[str, bytes] = {}
+    return FileResponse(DIR / f"{_pname(handle, f)}.png", media_type="image/png", headers={"Cache-Control": f"public, max-age={PROFILE_TTL}"})
+
+
+_cancelled: dict[str, tuple[float, int]] = {}
+_guide_png: dict[tuple[str, str], bytes] = {}
 
 
 def _host(req: Request) -> str:
     return req.headers.get("host") or req.url.hostname or ""
 
 
-def _help_text(req: Request) -> str:
-    return flags.HELP.format(host=_host(req), long=f"{LONG_VIDEO:g}", forced=_span(MAX_FORCED))
-
-
 def _span(s: float) -> str:
     return f"{s / 60:g} min" if s >= 60 else f"{s:g}s"
 
 
-def _card(req: Request, title: str, text: str, image: str | None = None) -> HTMLResponse:
+def _card(req: Request, title: str, text: str, image: str | None = None, color: str = "#1d9bf0") -> HTMLResponse:
     """A plain link embed: a title, a line of text, and an image if given."""
     e = lambda s: html.escape(str(s), quote=True)
     tags = [("og:site_name", _host(req)), ("og:title", title), ("og:description", text)]
@@ -652,56 +682,63 @@ def _card(req: Request, title: str, text: str, image: str | None = None) -> HTML
     return HTMLResponse(f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <title>{e(title)}</title>
-<meta name="theme-color" content="#1d9bf0">
+<meta name="theme-color" content="{e(color)}">
 <meta name="twitter:card" content="{'summary_large_image' if image else 'summary'}">
 {head}
 </head><body></body></html>""", headers={"Cache-Control": "no-store"})
 
 
+def _guide_values(req: Request) -> dict:
+    return {"host": _host(req), "long": f"{LONG_VIDEO:g}", "forced": _span(MAX_FORCED), "posts": profile.POSTS, "top_from": profile.TOP_FROM}
+
+
+def _guide(req: Request, page: guide.Page, bot: bool):
+    """A guide page: an embed with its image for a chat app, the page for a
+    browser, plain text for anything else."""
+    v = _guide_values(req)
+    if bot:
+        return _card(req, page.title, page.blurb.format(**v), f"{_base(req)}/{page.path}.png?v={VERSION}", guide.PINK)
+    if "text/html" in req.headers.get("accept", ""):
+        return HTMLResponse(guide.page_html(page, **v), headers={"Cache-Control": "no-store"})
+    return PlainTextResponse(guide.text(page, **v), headers={"Cache-Control": "no-store"})
+
+
 @app.get("/help.png")
-async def help_png(req: Request):
-    host = _host(req)
-    png = _help_png.get(host)
+@app.get("/workflows.png")
+async def guide_png(req: Request):
+    page = guide.PAGES[req.url.path[1:-len(".png")]]
+    key = (page.path, _host(req))
+    png = _guide_png.get(key)
     if png is None:
-        png = _help_png[host] = await asyncio.to_thread(_draw_help, _help_text(req))
+        if len(_guide_png) > 16:
+            # the host is the client's to name: forged ones mustn't pile up
+            _guide_png.clear()
+        png = _guide_png[key] = await asyncio.to_thread(guide.png, page, **_guide_values(req))
     return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
 
-def _draw_help(text: str) -> bytes:
-    """The guide as a dark card: headings in white, each flag in blue, its
-    meaning in grey, in a monospace face so the columns stay lined up."""
-    from PIL import Image, ImageDraw
-    import io
-    F = card.fonts()
-    size, lh, pad = 26, 38, 40
-    reg, bold = F.font("mono", size), F.font("mono-bold", size)
-    T = card.THEMES["dark"]
-    lines = text.rstrip("\n").splitlines()
-    lines = [l for l in lines if not (l and set(l) <= {"="})]
-    width = int(max(reg.getlength(l) for l in lines)) + 2 * pad
-    im = Image.new("RGB", (width, len(lines) * lh + 2 * pad), T["bg"])
-    d = ImageDraw.Draw(im)
-    for i, l in enumerate(lines):
-        y = pad + i * lh + lh - 10
-        if not l.strip():
-            continue
-        if not l.startswith(" "):
-            # a heading, or the opening lines; the first line is the title
-            head = i == 0 or l.split("(")[0].strip().isupper()
-            d.text((pad, y), l, font=bold if head else reg, fill=T["text"] if head else T["gray"], anchor="ls")
-        elif l.startswith("    "):
-            d.text((pad, y), l, font=reg, fill=T["blue"] if "://" in l else T["gray"], anchor="ls")
-        else:
-            # "  flag   meaning": the flag up to the first run of two spaces
-            body = l[2:]
-            cut = body.find("  ")
-            flag, rest = (body, "") if cut < 0 else (body[:cut], body[cut:])
-            x = pad + reg.getlength("  ")
-            d.text((x, y), flag, font=bold, fill=T["blue"], anchor="ls")
-            d.text((x + reg.getlength(flag), y), rest, font=reg, fill=T["text"], anchor="ls")
-    out = io.BytesIO()
-    im.save(out, "PNG", optimize=True)
-    return out.getvalue()
+@app.get("/guide/nunito.ttf")
+async def guide_font():
+    return FileResponse(guide.FONT, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
+
+
+async def _profile(req: Request, handle: str, f: flags.Flags, discord: bool):
+    """A profile link for a chat app: its image, sent as a post's png is."""
+    if (r := await shard.forward(req, _owner_key(f"u_{handle}"))):
+        return r
+    try:
+        meta = _meta(_pname(handle, f), PROFILE_TTL)
+        if meta is None:
+            render_profile(handle, f)
+            _, meta = await _profile_board(handle, f)
+    except Busy:
+        return _to_x(req)
+    except rs.ResolveError as e:
+        log.info("profile @%s: %s", handle, e)
+        return _to_x(req)
+    if f.raw:
+        return RedirectResponse(_file(_base(req), meta, "png"), status_code=302)
+    return HTMLResponse(_og(req, meta, bare=discord))
 
 
 @app.get("/me")
@@ -717,17 +754,20 @@ async def me(req: Request):
 async def post(path: str, req: Request):
     ua = req.headers.get("user-agent", "")
     m = STATUS.match(req.url.path)
+    u = None if m else USER.match(req.url.path)
+    if u and u.group(1).lower() in RESERVED:
+        u = None
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
     bot = discord or bool(BOTS.search(ua))
     if not req.headers.get(shard.PROXIED):
-        kind = "other" if not m else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
+        kind = "other" if not (m or u) else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
         metrics.request(kind, _host(req), req.cookies, ua)
-    if f.help or req.url.path.rstrip("/") == "/help":
-        if bot:
-            return _card(req, "embed flags", f"Swap x.com for {_host(req)} in a post link, then add flags after ? joined by &. "
-                                             f"The whole guide is in the image, and as text at {_base(req)}/help", f"{_base(req)}/help.png?v={VERSION}")
-        return PlainTextResponse(_help_text(req), headers={"Cache-Control": "no-store"})
+    page = guide.PAGES.get("help" if f.help else req.url.path.strip("/").lower())
+    if page:
+        return _guide(req, page, bot)
+    if u and (bot or f.raw):
+        return await _profile(req, u.group(1), f, discord)
     if m and (f.cancel or bot or f.raw) and (r := await shard.forward(req, m.group(1))):
         return r
     if m and f.cancel:
@@ -747,15 +787,6 @@ async def post(path: str, req: Request):
     if not m or not (bot or f.raw):
         return _to_x(req)
     tid = m.group(1)
-    if discord and f.media and not f.raw:
-        try:
-            post_ = await _post(tid, f)
-        except rs.ResolveError as e:
-            log.info("post %s: %s", tid, e)
-            return _to_x(req)
-        if _lone_gif(post_, f):
-            _gif_flags[tid] = (time.time(), f)
-            return HTMLResponse(_activity(req, tid, post_))
     try:
         meta = _meta(_name(tid, f))
         if meta is None or f.plain:
@@ -777,8 +808,11 @@ async def post(path: str, req: Request):
     except rs.ResolveError as e:
         log.info("post %s: %s", tid, e)
         return _to_x(req)
-    if f.raw or discord and meta["ext"] in ("mp4", "gif"):
+    if f.raw:
         return RedirectResponse(_file(_base(req), meta, meta["ext"]), status_code=302)
+    if discord and meta["ext"] in ("mp4", "gif"):
+        # a gif goes as an animated webp: Discord shows a linked gif as a still
+        return RedirectResponse(_file(_base(req), meta, "webp" if meta["ext"] == "gif" else "mp4"), status_code=302)
     return HTMLResponse(_og(req, meta, bare=discord))
 
 

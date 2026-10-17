@@ -1,7 +1,8 @@
 """Read one post from x.com into a plain dict: author, text with its links,
-media, counts, and the post it quotes (as deep as asked). The source is the
-fxtwitter API, which needs no login and answers for text-only posts, which
-yt-dlp does not. Nothing is written anywhere; results sit in the resolve cache.
+media, counts, and the post it quotes (as deep as asked); or a user and their
+latest posts. The source is the fxtwitter API, which needs no login and
+answers for text-only posts, which yt-dlp does not. Nothing is written
+anywhere; results sit in the resolve cache.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -22,6 +24,8 @@ log = logging.getLogger("convert.tweet")
 
 UA = "OpenAI File Downloader, XaiImageApiFetch/1.0"
 API = "https://api.fxtwitter.com/status/{id}"
+PROFILE = "https://api.fxtwitter.com/{handle}"
+STATUSES = "https://api.fxtwitter.com/2/profile/{handle}/statuses?count=20"
 MAX_DEPTH = 3
 _STATUS = re.compile(r"^https?://(?:www\.|mobile\.)?(?:x|twitter|vxtwitter|fxtwitter|fixupx|fixvx|twittpr)\.com/(?:[A-Za-z0-9_]+|i/web)/status(?:es)?/(\d+)", re.I)
 
@@ -44,16 +48,16 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
-async def _fetch_raw(tid: str, lang: str | None = None) -> dict:
+async def _api(url: str, what: str) -> dict:
+    """fxtwitter's answer, its failures told about `what` was asked for."""
     try:
-        # a language code on the end has fxtwitter add a translation
-        r = await client().get(API.format(id=tid) + (f"/{lang}" if lang else ""))
+        r = await client().get(url)
     except httpx.HTTPError as e:
         raise rs.ResolveError("x.com couldn't be reached right now") from e
     if r.status_code == 404:
-        raise rs.ResolveError("that post doesn't exist, or was deleted")
+        raise rs.ResolveError(f"that {what} doesn't exist, or was deleted")
     if r.status_code in (401, 403):
-        raise rs.ResolveError("that post is private")
+        raise rs.ResolveError(f"that {what} is private")
     if r.status_code == 429:
         raise rs.ResolveError("x.com is rate limiting the cluster right now, try again in a minute")
     if r.status_code >= 400:
@@ -63,8 +67,16 @@ async def _fetch_raw(tid: str, lang: str | None = None) -> dict:
     except ValueError:
         raise rs.ResolveError("x.com sent something unreadable") from None
     if j.get("code") == 401:
-        raise rs.ResolveError("that post is private")
-    if j.get("code") == 404 or not j.get("tweet"):
+        raise rs.ResolveError(f"that {what} is private")
+    if j.get("code") == 404:
+        raise rs.ResolveError(f"that {what} doesn't exist, or was deleted")
+    return j
+
+
+async def _fetch_raw(tid: str, lang: str | None = None) -> dict:
+    # a language code on the end has fxtwitter add a translation
+    j = await _api(API.format(id=tid) + (f"/{lang}" if lang else ""), "post")
+    if not j.get("tweet"):
         raise rs.ResolveError("that post doesn't exist, or was deleted")
     return j["tweet"]
 
@@ -94,6 +106,66 @@ async def fetch(tid: str, depth: int, lang: str | None = None) -> dict:
     log.info("tweet %s depth %d%s %.1fs", tid, depth, f" {lang}" if lang else "", time.time() - t0)
     rs._put(key, post)
     return post
+
+
+_reading: dict[str, asyncio.Task] = {}   # timelines being read, so a page and its render share one read
+
+
+async def timeline(handle: str, scan: int, want: int | None = None) -> dict:
+    """{"user": the account, "posts": its own posts, newest first, each with
+    the post it quotes}, read from its last `scan` timeline entries, or until
+    `want` posts are found. Reposts are left out, and so are replies, which
+    x.com's profile timeline doesn't list."""
+    key = f"timeline:{handle.lower()}:{scan}:{want}"
+    hit = rs.cached(key)
+    if hit is not None:
+        return hit
+    t = _reading.get(key)
+    if t is None:
+        t = _reading[key] = asyncio.ensure_future(_timeline(handle, scan, want, key))
+        t.add_done_callback(lambda _: _reading.pop(key, None))
+    return await asyncio.shield(t)
+
+
+async def _timeline(handle: str, scan: int, want: int | None, key: str) -> dict:
+    t0 = time.time()
+    u, page = await asyncio.gather(_api(PROFILE.format(handle=handle), "account"),
+                                   _api(STATUSES.format(handle=handle), "account"), return_exceptions=True)
+    if isinstance(u, BaseException):
+        raise u
+    user = u.get("user") or {}
+    if not user.get("screen_name"):
+        raise rs.ResolveError("that account doesn't exist")
+    if user.get("protected"):
+        raise rs.ResolveError("that account is private")
+    posts, seen = [], 0
+    while True:
+        if isinstance(page, BaseException):
+            raise page
+        results = page.get("results") or []
+        seen += len(results)
+        for raw in results:
+            if raw.get("reposted_by") or str((raw.get("author") or {}).get("screen_name", "")).lower() != user["screen_name"].lower():
+                continue
+            post = _normalize(raw)
+            if raw.get("quote"):
+                post["quote"] = _normalize(raw["quote"])
+            posts.append(post)
+        # a page holds about 20 entries, whatever count asks for
+        cursor = (page.get("cursor") or {}).get("bottom")
+        if not results or not cursor or seen >= scan or want and len(posts) >= want:
+            break
+        try:
+            page = await _api(STATUSES.format(handle=handle) + f"&cursor={quote(cursor)}", "account")
+        except rs.ResolveError:
+            if not posts:
+                raise
+            break
+    posts.sort(key=lambda p: p["created"], reverse=True)
+    out = {"user": _user(user), "posts": posts}
+    log.info("timeline @%s %d posts in %d entries %.1fs", handle, len(posts), seen, time.time() - t0)
+    rs._put(key, out)
+    return out
 
 
 _LANG_NAMES: dict[str, str] = {}
@@ -239,6 +311,24 @@ def _normalize(raw: dict) -> dict:
         "replying_to": raw.get("replying_to"),
         "media": _media(raw),
         "quote": None,
+    }
+
+
+def _user(u: dict) -> dict:
+    ver = u.get("verification") or {}
+    # the avatar fxtwitter links is 48px; the header draws it far larger
+    avatar = re.sub(r"_normal(\.\w+)$", r"_400x400\1", u.get("avatar_url") or "") or None
+    return {
+        "name": u.get("name") or u.get("screen_name") or "",
+        "handle": u.get("screen_name") or "",
+        "url": u.get("url") or f"https://x.com/{u.get('screen_name')}",
+        "avatar": avatar,
+        "banner": u.get("banner_url") or None,
+        "bio": _spans({"raw_text": u.get("raw_description") or {"text": u.get("description") or ""}}),
+        "verified": bool(ver.get("verified")),
+        "followers": int(u.get("followers") or 0),
+        "following": int(u.get("following") or 0),
+        "posts": int(u.get("tweets") or u.get("statuses") or 0),
     }
 
 

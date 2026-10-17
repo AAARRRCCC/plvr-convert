@@ -27,6 +27,11 @@ own preview. Discord is redirected to the mp4 at once and streamed it while
 it renders, so it plays like an upload; other link-preview fetchers get Open
 Graph tags; a browser goes on to x.com. Run it with `uvicorn app.embed:app`.
 
+A profile link (`/<user>`) unfurls as an image of the profile: its header and
+the user's 6 latest posts in two columns (`app/profile.py`). `/help` and
+`/workflows` are the guide (`app/guide.py`): every flag, and the combinations
+that aren't obvious, as an image for a chat app and a page for a browser.
+
 Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 `t=...` and anything else unknown are ignored and passed on to x.com.
 
@@ -40,17 +45,18 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |
 | `lines` | a number | cut the text there, with "Show more" |
-| `media` | | the media alone, stacked edge to edge: no name, text or stats (a long video goes to Discord as x.com's file; a lone gif comes out as a real gif) |
+| `media` | | the media alone, stacked edge to edge: no name, text or stats (a long video goes to Discord as x.com's file; a lone gif comes out as the gif itself, to Discord an animated webp it shows on its own) |
 | `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a clip under `LONG_VIDEO` renders even from a long one |
 | `plain` | | a video post goes out as x.com's own file |
 | `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |
 | `cancel` | | stops every running render of the post, ffmpeg included |
-| `help` | | this guide as plain text, instead of the post (`/help` too) |
+| `top` | | on a profile: the most liked of their last 100 timeline entries, not the latest |
+| `help` | | the guide instead of the post (`/help` too) |
 
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
 `EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `LONG_VIDEO`, `X264_PRESET`,
-`TARGET_MB`.
+`TARGET_MB`, `PROFILE_TTL`, `PROFILE_POSTS`.
 
 ## Run it
 

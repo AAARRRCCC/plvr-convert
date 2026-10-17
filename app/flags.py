@@ -1,6 +1,7 @@
 """Flags on an embed link, read from its query string:
 
     https://<embed host>/<user>/status/<id>?v2=image&q=2
+    https://<embed host>/<user>?top
 
 Each one changes what the render shows. Anything this doesn't know, like the
 s=20 and t=... x.com puts on a shared link, is ignored, and so is a known
@@ -16,7 +17,7 @@ flag with a value it can't read.
     theme        dark, dim, light
     lang         translate the text into this language (es, ja, fr, de, ...)
     media        the media alone, stacked edge to edge: no name, text or stats;
-                 a lone gif is a real gif, from x.com's own file
+                 a lone gif is the gif itself, made from x.com's own file
     lines        cut the text after this many lines, with "Show more"
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
     plain        a video post goes out as x.com's own file, not the render
@@ -24,7 +25,8 @@ flag with a value it can't read.
     raw          every visitor, a browser too, is sent to the rendered file
                  (or to x.com's own file, for a video too long to render)
     cancel       stop every render of this post that is still running
-    help         the guide below, as plain text, instead of the post
+    top          on a profile: their most liked recent posts, not the latest
+    help         the guide (guide.py) instead of the post
 
 Videos are counted from the top post down through its quotes, only the ones
 that are there: on a post with a video quoting a post with a video, v1 is the
@@ -44,7 +46,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render", "top"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -59,47 +61,6 @@ LANGS = {
     "norwegian": "no", "danish": "da", "finnish": "fi", "greek": "el", "czech": "cs", "romanian": "ro", "hungarian": "hu",
 }
 
-HELP = """embed flags
-===========
-
-Swap x.com for {host} in a post link, then add flags after ? joined by &.
-x.com's own s=20 / t=... are ignored.
-
-    https://{host}/jaydiarie/status/2102564951177011259?s=20&v2=image
-
-VIDEOS  (counted from the top: v1 is the first video there is, v2 the next)
-    both posts have one: v1 = the post's, v2 = the quoted one's
-    only the quoted tweet has one: that one is v1
-  v2=image        a still, no playback
-  v2=mute         plays silently
-  v2=sound        this one gets the audio and sets the length
-  v2=hide         removed
-  v=image         every video (a numbered flag overrides it: v=image&v1=video)
-
-LOOK
-  q=0 .. q=3      how many quote levels (default 1; q=0 drops the quote)
-  lang=es         translate the text (a code like ja, fr, de, ko, or a name like japanese)
-  quote           only the quoted tweet, without the one quoting it
-                  (quote&media: just the quoted tweet's video)
-  stats=0         no reply/repost/like row
-  theme=dim       or theme=light
-  lines=5         cut the text after 5 lines
-  media           the video/images alone, nothing else of the post
-                  (a gif on its own comes out as a real gif you can save)
-
-TIMING
-  start=1:30&end=1:45   clip the video (90, 1:30 and 1m30s all work)
-                        over {long}s goes out as x.com's own video; a shorter clip renders
-  render          render it anyway, up to {forced}
-
-OTHER
-  plain           x.com's own video instead of the render
-  raw             open the rendered file itself (to try flags in a browser)
-  cancel          stop a render of this post started by accident
-  help            this
-"""
-
-
 @dataclass(frozen=True)
 class Flags:
     depth: int = DEPTH
@@ -108,6 +69,7 @@ class Flags:
     lines: int | None = None
     media: bool = False
     quote: bool = False
+    top: bool = False
     lang: str | None = None
     start: float = 0.0
     end: float | None = None
@@ -140,6 +102,8 @@ class Flags:
             q.append(("lang", self.lang))
         if self.media:
             q.append(("media", 1))
+        if self.top:
+            q.append(("top", 1))
         if self.start:
             q.append(("start", _num(self.start)))
         if self.end is not None:
@@ -190,7 +154,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "quote") and _bool(v) is not None:
+        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "quote", "top") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

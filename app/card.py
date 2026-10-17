@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from glob import glob
 from pathlib import Path
@@ -239,6 +240,20 @@ def fetch_image(url: str | None) -> Image.Image | None:
         return im.convert("RGBA")
     except Exception:
         return None
+
+
+def prefetch(layouts: list[Layout]) -> None:
+    """Fetch every image the layouts draw, several at once, into the cache
+    render reads from: drawing fetches them one after another."""
+    urls = set()
+    for L in layouts:
+        for op in L.ops:
+            if op[0] in ("avatar", "image", "poster") and op[1]:
+                urls.add(op[1])
+            elif op[0] == "lines":
+                urls |= {TWEMOJI.format(code=twemoji_code(a["s"])) for line in op[1].lines for a in line if a["kind"] == "emoji"}
+    with ThreadPoolExecutor(8) as ex:
+        list(ex.map(fetch_bytes, urls))
 
 
 def emoji_image(cluster: str, px: int) -> Image.Image | None:
@@ -758,7 +773,13 @@ def _fit(im: Image.Image, w: int, h: int, fit: str, bg) -> Image.Image:
 
 
 def render(L: Layout, holes: bool = True) -> bytes:
-    """Draw the layout; with `holes`, every video cell is left transparent."""
+    """Draw the layout as a png; with `holes`, every video cell is left transparent."""
+    out = io.BytesIO()
+    draw(L, holes).save(out, "PNG", optimize=False, compress_level=6)
+    return out.getvalue()
+
+
+def draw(L: Layout, holes: bool = True) -> Image.Image:
     T = L.theme
     im = Image.new("RGBA", (L.width, L.height), T["bg"])
     d = ImageDraw.Draw(im)
@@ -826,6 +847,4 @@ def render(L: Layout, holes: bool = True) -> bytes:
             hole = _mask(c.w, c.h, c.radius, c.corners)
             clear = Image.new("RGBA", (c.w, c.h), (0, 0, 0, 0))
             im.paste(clear, (c.x, c.y), hole)
-    out = io.BytesIO()
-    im.save(out, "PNG", optimize=False, compress_level=6)
-    return out.getvalue()
+    return im
