@@ -27,6 +27,7 @@ flag with a value it can't read.
     cancel       stop every render of this post that is still running
     top          on a profile: their most liked recent posts, not the latest
     help         the guide (guide.py) instead of the post
+    workflows    the guide's combos page instead of the post
 
 Videos are counted from the top post down through its quotes, only the ones
 that are there: on a post with a video quoting a post with a video, v1 is the
@@ -46,7 +47,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render", "top"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render", "top", "workflows"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -79,6 +80,7 @@ class Flags:
     raw: bool = False
     cancel: bool = False
     help: bool = False
+    workflows: bool = False
 
     def treatment(self, n: int) -> str:
         per = dict(self.videos)
@@ -154,7 +156,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "quote", "top") and _bool(v) is not None:
+        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "workflows", "quote", "top") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

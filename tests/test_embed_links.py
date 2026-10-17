@@ -43,7 +43,8 @@ def post(i: int, likes: int = 0, media: list | None = None) -> dict:
 
 def test_guide_for_a_chat_app():
     c = client()
-    for path, page in (("/help", "help"), ("/someone/status/5?help", "help"), ("/workflows", "workflows")):
+    for path, page in (("/help", "help"), ("/someone/status/5?help", "help"), ("/workflows", "workflows"),
+                       ("/someone?top&workflows", "workflows")):
         r = c.get(path, headers={"User-Agent": DISCORDBOT})
         assert f'og:image" content="https://{HOST}/{page}.png?v=' in r.text, path
         assert f'theme-color" content="{guide.PINK}"' in r.text

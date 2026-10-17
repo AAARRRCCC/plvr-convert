@@ -759,7 +759,7 @@ async def post(path: str, req: Request):
     if not req.headers.get(shard.PROXIED):
         kind = "other" if not (m or u) else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
         metrics.request(kind, _host(req), req.cookies, ua)
-    page = guide.PAGES.get("help" if f.help else req.url.path.strip("/").lower())
+    page = guide.PAGES.get("help" if f.help else "workflows" if f.workflows else req.url.path.strip("/").lower())
     if page:
         return _guide(req, page, bot)
     if u and (bot or f.raw):

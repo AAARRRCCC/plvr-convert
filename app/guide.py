@@ -49,7 +49,7 @@ def _items(*pairs: tuple[str, str]) -> list[Item]:
 
 
 HELP = Page(
-    "help", "embed flags", "Swap x.com for {host}, add flags after ?. Combos: {host}/workflows",
+    "help", "embed flags", "welcome to super awesomeyurisex dot com embed help page ! :D",
     "Swap x.com for {host}, add flags after ?",
     "{host}/user/status/123?media&q=0",
     "Flags",
@@ -57,7 +57,8 @@ HELP = Page(
            ("v2=image", "2nd video as a still (or mute, sound, hide)"), ("v=image", "every video"),
            ("lines=5", "cut the text"), ("stats=0", "no counts"), ("theme=light", "or dim"), ("lang=ja", "translate"),
            ("start=1:30&end=1:45", "clip"), ("render", "draw videos over {long}s"), ("plain", "x.com's own video"),
-           ("raw", "open the file"), ("top", "a profile's most liked"), ("cancel", "stop a render"), ("help", "this page")),
+           ("raw", "open the file"), ("top", "a profile's most liked"), ("cancel", "stop a render"), ("help", "this page"),
+           ("workflows", "the combos page")),
     ("More combos:", "{host}/workflows"),
 )
 

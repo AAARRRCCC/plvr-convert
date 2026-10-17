@@ -52,6 +52,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `cancel` | | stops every running render of the post, ffmpeg included |
 | `top` | | on a profile: the most liked of their last 100 timeline entries, not the latest |
 | `help` | | the guide instead of the post (`/help` too) |
+| `workflows` | | the guide's combos page instead of the post (`/workflows` too) |
 
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
