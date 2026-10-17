@@ -28,9 +28,10 @@ kept under the post's id plus a hash of the flags, and its files are linked
 with the same flags in their query string, so a file request that comes
 before the render can start it.
 
-A post whose only media is a gif, linked with the media flag, sends Discord
-straight to the gif itself, as an animated webp: a link to an image is shown
-as the image alone, the link hidden, the way a gif host's link is.
+A post whose only media is a gif, linked with the media flag, goes to Discord
+as a page whose only tag is the gif: it shows the image alone, nothing around
+it, and plays it as a gif because its link ends in .gif. Redirected to the
+gif, Discord would show a still, since it goes by the link in the message.
 
 A profile link, https://<this host>/<user>, gets the same treatment with an
 image of the profile: its header and several of the user's own posts
@@ -291,11 +292,7 @@ async def _profile_job(handle: str, f: flags.Flags, info: dict) -> dict:
 
 async def _make_files(s: shot.Shot, L: card.Layout, post: dict, f: flags.Flags, meta: dict, name: str) -> None:
     if meta["ext"] == "gif":
-        # the gif, and the same as an animated webp for Discord
-        g = _lone_gif(post, f)
-        for r in await asyncio.gather(_anim(g, DIR / f"{name}.gif", f), _anim(g, DIR / f"{name}.webp", f), return_exceptions=True):
-            if isinstance(r, BaseException):
-                raise r
+        await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
     else:
         # the poster is the card with each video's thumbnail drawn in: the png
         # itself for a post without video, the preview image for one with,
@@ -327,10 +324,9 @@ def _gif_size(item: dict) -> tuple[int, int]:
     return w, h + h % 2
 
 
-async def _anim(item: dict, dest: Path, f: flags.Flags) -> None:
-    """x.com's mp4 of a gif, back into a gif (or a webp, by dest's suffix):
-    its own frames at its own size (down to GIF_WIDTH), looping; a gif's
-    colours come from a palette made from those frames."""
+async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
+    """x.com's mp4 of a gif, back into a gif: its own frames at its own size
+    (down to GIF_WIDTH), through a palette made from those frames, looping."""
     rs.assert_public(item["url"])
     w, _ = _gif_size(item)
     argv = [shot.FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
@@ -340,11 +336,8 @@ async def _anim(item: dict, dest: Path, f: flags.Flags) -> None:
     if f.end:
         argv += ["-t", f"{f.end - f.start:.3f}"]
     tmp = dest.with_name(dest.name + ".tmp")
-    if dest.suffix == ".webp":
-        argv += ["-vf", f"scale={w}:-2:flags=lanczos", "-an", "-c:v", "libwebp_anim", "-quality", "80", "-loop", "0", "-f", "webp", str(tmp)]
-    else:
-        argv += ["-vf", f"scale={w}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
-                 "-loop", "0", "-f", "gif", str(tmp)]
+    argv += ["-vf", f"scale={w}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
+             "-loop", "0", "-f", "gif", str(tmp)]
     proc = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(), RENDER_TIMEOUT)
@@ -616,7 +609,7 @@ def _owner_key(rid: str) -> str:
 
 
 async def _serve(name: str, f: flags.Flags, req: Request):
-    m = re.fullmatch(r"(\d{1,20}|u_[A-Za-z0-9_]{1,15})\.(mp4|png|gif|webp)", name)
+    m = re.fullmatch(r"(\d{1,20}|u_[A-Za-z0-9_]{1,15})\.(mp4|png|gif)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
@@ -640,9 +633,9 @@ async def _serve(name: str, f: flags.Flags, req: Request):
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
     # the files each kind of render leaves: an mp4 has its poster png too
-    if ext not in {"mp4": ("mp4", "png"), "png": ("png",), "gif": ("gif", "webp")}[meta["ext"]]:
+    if ext not in {"mp4": ("mp4", "png"), "png": ("png",), "gif": ("gif",)}[meta["ext"]]:
         return Response(status_code=404)
-    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png"),
+    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif"}.get(ext, "image/png"),
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 
@@ -808,11 +801,10 @@ async def post(path: str, req: Request):
     except rs.ResolveError as e:
         log.info("post %s: %s", tid, e)
         return _to_x(req)
-    if f.raw:
+    if f.raw or discord and meta["ext"] == "mp4":
         return RedirectResponse(_file(_base(req), meta, meta["ext"]), status_code=302)
-    if discord and meta["ext"] in ("mp4", "gif"):
-        # a gif goes as an animated webp: Discord shows a linked gif as a still
-        return RedirectResponse(_file(_base(req), meta, "webp" if meta["ext"] == "gif" else "mp4"), status_code=302)
+    # a png or a gif goes to Discord as a page with the image alone: it plays
+    # a gif only when the link it shows ends in .gif, which a redirect's doesn't
     return HTMLResponse(_og(req, meta, bare=discord))
 
 

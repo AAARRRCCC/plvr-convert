@@ -203,9 +203,13 @@ def gif_post(monkeypatch):
     return started
 
 
-def test_lone_gif_goes_to_discord_as_the_gif_itself(gif_post):
+def test_lone_gif_goes_to_discord_as_the_gif_alone(gif_post):
     r = client().get("/someone/status/1?s=20&media", headers={"User-Agent": DISCORDBOT}, follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == f"https://{HOST}/m/q/media=1/1.webp"
+    # a page, not a redirect: Discord plays an image as a gif only when the
+    # link it shows ends in .gif
+    assert r.status_code == 200
+    assert f'og:image" content="https://{HOST}/m/q/media=1/1.gif"' in r.text and 'content="image/gif"' in r.text
+    assert "og:title" not in r.text
     assert gif_post == ["?media=1"]
 
 
@@ -214,15 +218,13 @@ def test_lone_gif_for_other_fetchers_is_the_real_gif(gif_post):
     assert f"https://{HOST}/m/q/media=1/1.gif" in r.text and 'content="image/gif"' in r.text
 
 
-def test_gif_render_serves_its_webp_and_gif(tmp_path):
+def test_gif_render_serves_only_its_gif(tmp_path):
     f = flags.parse({"media": ""})
     name = embed._name("7", f)
     (tmp_path / f"{name}.json").write_text(json.dumps({"id": "7", "ext": "gif", "query": f.query()}))
-    (tmp_path / f"{name}.webp").write_bytes(b"RIFF....WEBP")
     (tmp_path / f"{name}.gif").write_bytes(b"GIF89a")
     c = client()
-    r = c.get("/m/q/media=1/7.webp")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/webp" and r.content == b"RIFF....WEBP"
-    assert c.get("/m/q/media=1/7.gif").headers["content-type"] == "image/gif"
+    r = c.get("/m/q/media=1/7.gif")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/gif" and r.content == b"GIF89a"
     assert c.get("/m/q/media=1/7.png").status_code == 404
     assert c.get("/m/q/media=1/7.mp4").status_code == 404
