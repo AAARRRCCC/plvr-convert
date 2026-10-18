@@ -38,7 +38,11 @@ image of the profile: its header and several of the user's own posts
 (profile.py), or with top their most liked. /help and /workflows are the
 guide (guide.py): an image for a chat app, a page for a browser.
 
-Renders are kept on disk for RENDER_TTL, a profile's for PROFILE_TTL. Run with
+Renders are kept on disk for RENDER_TTL, a profile's for PROFILE_TTL. A gif
+is kept in GIF_DIR until GIF_MAX_MB pushes out the one served longest ago: a
+chat app saves its link to favorites, and a favorite sent again has Discord
+fetch the gif itself, which it gives up on if it has to wait for a render.
+Run with
 
     uvicorn app.embed:app
 """
@@ -86,6 +90,8 @@ MAXRATE_KBPS = 3000
 RENDER_TIMEOUT = 900
 FULL = 10_000                                        # lines of text: no cut
 GIF_WIDTH = int(os.environ.get("GIF_WIDTH", 720))    # a real gif is scaled down to this, never up
+GIF_DIR = Path(os.environ.get("GIF_DIR", f"{DIR}-gif"))
+GIF_MAX_MB = int(os.environ.get("GIF_MAX_MB", 1800))
 
 # Discord's unfurler sends its own UA and, for some fetches, one of these
 # fixed old Firefox strings.
@@ -101,6 +107,7 @@ RESERVED = {"help", "workflows", "me", "healthz", "metrics", "home", "explore", 
 @asynccontextmanager
 async def lifespan(app):
     DIR.mkdir(parents=True, exist_ok=True)
+    GIF_DIR.mkdir(parents=True, exist_ok=True)
     shard.from_env()
     metrics.bind_jobs(lambda: len(_jobs))
     metrics.start()
@@ -130,14 +137,22 @@ _slots = asyncio.Semaphore(RENDERS)
 
 
 def _meta(name: str, ttl: int = RENDER_TTL) -> dict | None:
-    """The finished render's description, if there is a fresh one on disk."""
-    p = DIR / f"{name}.json"
-    try:
-        if time.time() - p.stat().st_mtime > ttl:
-            return None
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    """The finished render's description, if there is a fresh one on disk; a
+    gif's is never stale."""
+    for d, limit in ((DIR, ttl), (GIF_DIR, None)):
+        p = d / f"{name}.json"
+        try:
+            if limit is not None and time.time() - p.stat().st_mtime > limit:
+                continue
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _home(ext: str) -> Path:
+    """Where a render of this kind keeps its files."""
+    return GIF_DIR if ext == "gif" else DIR
 
 
 def _name(tid: str, f: flags.Flags) -> str:
@@ -256,9 +271,9 @@ async def _render_job(tid: str, f: flags.Flags, info: dict) -> dict:
         except OSError:
             pass   # still open for a stream; the prune takes it later
         raise
-    _write(DIR / f"{name}.json", json.dumps(meta).encode())
+    _write(_home(meta["ext"]) / f"{name}.json", json.dumps(meta).encode())
     log.info("rendered %s%s %s %dx%d in %.1fs", tid, f.query(), meta["ext"], meta["width"], meta["height"], time.time() - t0)
-    await asyncio.to_thread(_prune)
+    await asyncio.to_thread(_prune_gifs if meta["ext"] == "gif" else _prune)
     return meta
 
 
@@ -292,7 +307,7 @@ async def _profile_job(handle: str, f: flags.Flags, info: dict) -> dict:
 
 async def _make_files(s: shot.Shot, L: card.Layout, post: dict, f: flags.Flags, meta: dict, name: str) -> None:
     if meta["ext"] == "gif":
-        await _gif(_lone_gif(post, f), DIR / f"{name}.gif", f)
+        await _gif(_lone_gif(post, f), GIF_DIR / f"{name}.gif", f)
     else:
         # the poster is the card with each video's thumbnail drawn in: the png
         # itself for a post without video, the preview image for one with,
@@ -441,6 +456,27 @@ def _prune() -> None:
             continue
         # the json goes with its files, so a render is either whole or absent
         (DIR / f"{p.stem.split('.')[0]}.json").unlink(missing_ok=True)
+        p.unlink(missing_ok=True)
+        total -= size
+
+
+def _prune_gifs() -> None:
+    """Drop the gifs served longest ago until under GIF_MAX_MB; serving one
+    marks it."""
+    gifs = []
+    for p in GIF_DIR.glob("*.gif"):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        gifs.append((st.st_mtime, st.st_size, p))
+    total = sum(g[1] for g in gifs)
+    for _, size, p in sorted(gifs):
+        if total <= GIF_MAX_MB << 20:
+            break
+        if p.stem in _jobs:
+            continue
+        p.with_suffix(".json").unlink(missing_ok=True)
         p.unlink(missing_ok=True)
         total -= size
 
@@ -635,7 +671,13 @@ async def _serve(name: str, f: flags.Flags, req: Request):
     # the files each kind of render leaves: an mp4 has its poster png too
     if ext not in {"mp4": ("mp4", "png"), "png": ("png",), "gif": ("gif",)}[meta["ext"]]:
         return Response(status_code=404)
-    return FileResponse(DIR / f"{stem}.{ext}", media_type={"mp4": "video/mp4", "gif": "image/gif"}.get(ext, "image/png"),
+    path = _home(ext) / f"{stem}.{ext}"
+    if ext == "gif":
+        try:
+            os.utime(path)
+        except OSError:
+            pass
+    return FileResponse(path, media_type={"mp4": "video/mp4", "gif": "image/gif"}.get(ext, "image/png"),
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 

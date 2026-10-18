@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from urllib.parse import parse_qs, urlsplit
 
@@ -26,6 +27,8 @@ HOST = "embed.example"
 def reset(monkeypatch, tmp_path):
     shard.configure(1, "embed-0")
     monkeypatch.setattr(embed, "DIR", tmp_path)
+    monkeypatch.setattr(embed, "GIF_DIR", tmp_path / "gif")
+    (tmp_path / "gif").mkdir()
 
 
 def client() -> TestClient:
@@ -230,13 +233,41 @@ def test_lone_gif_for_other_fetchers_is_the_real_gif(gif_post):
     assert f"https://{HOST}/m/q/media=1/1.gif" in r.text and 'content="image/gif"' in r.text
 
 
-def test_gif_render_serves_only_its_gif(tmp_path):
+def _gif_render(d, tid: str, size: int = 6, served: float | None = None) -> str:
     f = flags.parse({"media": ""})
-    name = embed._name("7", f)
-    (tmp_path / f"{name}.json").write_text(json.dumps({"id": "7", "ext": "gif", "query": f.query()}))
-    (tmp_path / f"{name}.gif").write_bytes(b"GIF89a")
+    name = embed._name(tid, f)
+    (d / f"{name}.json").write_text(json.dumps({"id": tid, "ext": "gif", "query": f.query()}))
+    (d / f"{name}.gif").write_bytes(b"GIF89a".ljust(size, b"."))
+    if served is not None:
+        os.utime(d / f"{name}.gif", (served, served))
+    return name
+
+
+def test_gif_render_serves_only_its_gif(tmp_path):
+    _gif_render(tmp_path / "gif", "7")
     c = client()
     r = c.get("/m/q/media=1/7.gif")
     assert r.status_code == 200 and r.headers["content-type"] == "image/gif" and r.content == b"GIF89a"
     assert c.get("/m/q/media=1/7.png").status_code == 404
     assert c.get("/m/q/media=1/7.mp4").status_code == 404
+
+
+def test_gif_outlives_the_render_ttl(tmp_path, monkeypatch):
+    # a favorite sends Discord to the gif itself, maybe days later: it must
+    # not wait on a render
+    name = _gif_render(tmp_path / "gif", "7", served=1_000)
+    os.utime(tmp_path / "gif" / f"{name}.json", (1_000, 1_000))
+    monkeypatch.setattr(embed, "render", lambda tid, f: pytest.fail("rendered again"))
+    r = client().get("/m/q/media=1/7.gif")
+    assert r.status_code == 200 and r.content.startswith(b"GIF89a")
+    # serving it marks it as recently wanted
+    assert (tmp_path / "gif" / f"{name}.gif").stat().st_mtime > 1_000
+
+
+def test_gifs_over_the_cap_go_least_recently_served_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(embed, "GIF_MAX_MB", 2)
+    d = tmp_path / "gif"
+    old, mid, new = (_gif_render(d, tid, 1 << 20, served=t) for tid, t in (("1", 1_000), ("2", 2_000), ("3", 3_000)))
+    embed._prune_gifs()
+    assert not (d / f"{old}.gif").exists() and not (d / f"{old}.json").exists()
+    assert (d / f"{mid}.gif").exists() and (d / f"{new}.gif").exists()
