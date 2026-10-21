@@ -1,7 +1,7 @@
 """A profile drawn as one image: the header x.com shows (banner, avatar, name,
 bio, counts), then several of the user's own posts, each drawn as card.py
 draws a post, in two columns. Videos are drawn as their stills, so it is
-always a png.
+always a png. A Substack profile is the same, with its notes for posts.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def layout(user: dict, posts: list[dict], theme: str = "dark", stats: bool = Tru
            depth: int = 1, top: bool = False, pool: int = 0) -> Board:
     """Each post goes under the shorter column, so the two end up about even.
     `pool` is how many posts the top ones were picked from."""
-    T = card.THEMES.get(theme, card.THEMES["dark"])
+    T = card.palette(theme, user.get("site"))
     S = card.S
     colw = card.COL * S
     width = COLS * colw + (COLS - 1) * S
@@ -106,15 +106,18 @@ def _header(user: dict, width: int, T: dict, top: bool, shown: int, pool: int) -
         ops.append(("lines", bio, px(16), px(y)))
         y += bio.height + 12
     x = 16
-    for n, label in ((user["following"], "Following"), (user["followers"], "Followers"), (user["posts"], "posts")):
-        num = card.count(n) or "0"
+    # a site other than x.com names its own counts; a figure it gives as text is shown as is
+    counts = user.get("counts") or ((user["following"], "Following"), (user["followers"], "Followers"), (user["posts"], "posts"))
+    for n, label in counts:
+        num = n if isinstance(n, str) else card.count(n) or "0"
         ops.append(("text", num, "bold", 15, px(x), px(y), T["text"]))
         x += F.font("bold", 15 * S).getlength(num) / S + 4
         ops.append(("text", label, "regular", 15, px(x), px(y), T["gray"]))
         x += F.font("regular", 15 * S).getlength(label) / S + 20
     y += 36
     # a tab, as x.com marks the one open
-    tab = "Top posts" if top else "Posts"
+    tab = user.get("tab", "Posts")
+    tab = f"Top {tab.lower()}" if top else tab
     note = f"the {shown} most liked of their last {pool}" if top else f"their {shown} latest"
     tw = F.font("bold", 15 * S).getlength(tab) / S
     ops.append(("text", tab, "bold", 15, px(16), px(y), T["text"]))

@@ -38,6 +38,14 @@ image of the profile: its header and several of the user's own posts
 (profile.py), or with top their most liked. /help and /workflows are the
 guide (guide.py): an image for a chat app, a page for a browser.
 
+A Substack note works the same with substack.com swapped for this host:
+
+    https://<this host>/@<user>/note/c-<id>
+
+and https://<this host>/@<user> is that user's profile, with their notes for
+posts (substack.py). Their renders are named ss_<id> and su_<user>, apart
+from x.com's, and a browser is sent on to substack.com.
+
 Renders are kept on disk for RENDER_TTL, a profile's for PROFILE_TTL. A gif
 is kept in GIF_DIR until GIF_MAX_MB pushes out the one served longest ago: a
 chat app saves its link to favorites, and a favorite sent again has Discord
@@ -63,7 +71,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
-from . import card, flags, guide, metrics, profile, shard, shot, tunnel, tweet
+from . import card, flags, guide, metrics, profile, shard, shot, substack, tunnel, tweet
 from . import plan as planning
 from . import resolve as rs
 from .plan import FRAG
@@ -99,6 +107,10 @@ DISCORD = re.compile(r"Discordbot|rv:38\.0\) Gecko/20100101 Firefox/38\.0|rv:92\
 BOTS = re.compile(r"bot\b|bot/|crawler|spider|facebookexternalhit|whatsapp|telegram|slack|skype|embedly|iframely|mastodon|cardyb|bluesky|vkshare|pinterest|preview", re.I)
 STATUS = re.compile(r"^/(?:[A-Za-z0-9_]{1,15}|i(?:/web)?)/status(?:es)?/(\d{1,20})(?:/.*)?$")
 USER = re.compile(r"^/([A-Za-z0-9_]{1,15})/?$")
+# substack.com's: a note, with or without its author, and a profile
+NOTE = re.compile(r"^/(?:@[A-Za-z0-9_]{1,64}/)?note/c-(\d{1,20})(?:/.*)?$")
+SUSER = re.compile(r"^/@([A-Za-z0-9_]{1,64})/?$")
+SITES = {"x": "x.com", "substack": "substack.com"}
 # top-level paths on x.com, and here, that aren't anyone's profile
 RESERVED = {"help", "workflows", "me", "healthz", "metrics", "home", "explore", "search", "notifications", "messages", "settings",
             "i", "compose", "login", "logout", "signup", "tos", "privacy", "about", "jobs", "hashtag", "intent", "share"}
@@ -159,9 +171,15 @@ def _name(tid: str, f: flags.Flags) -> str:
     return tid + f.key()
 
 
-def _pname(handle: str, f: flags.Flags) -> str:
-    """A profile render's name: never all digits, so never a post's."""
-    return f"u_{handle.lower()}{f.key()}"
+def _pname(pid: str, f: flags.Flags) -> str:
+    """A profile render's name, from its id (u_<handle>, or su_<handle> on
+    Substack): never all digits, so never a post's."""
+    return f"{pid.lower()}{f.key()}"
+
+
+def _site(rid: str) -> str:
+    """Which site a render's post or profile is from, by its id."""
+    return "substack" if rid.startswith(("ss_", "su_")) else "x"
 
 
 def render(tid: str, f: flags.Flags) -> asyncio.Task:
@@ -169,8 +187,8 @@ def render(tid: str, f: flags.Flags) -> asyncio.Task:
     return _start(_name(tid, f), lambda info: _render_job(tid, f, info))
 
 
-def render_profile(handle: str, f: flags.Flags) -> asyncio.Task:
-    return _start(_pname(handle, f), lambda info: _profile_job(handle, f, info))
+def render_profile(pid: str, f: flags.Flags) -> asyncio.Task:
+    return _start(_pname(pid, f), lambda info: _profile_job(pid, f, info))
 
 
 def _start(name: str, job) -> asyncio.Task:
@@ -197,8 +215,8 @@ async def media(tid: str, f: flags.Flags) -> dict:
     return await _finished(_meta(_name(tid, f)), lambda: render(tid, f))
 
 
-async def profile_media(handle: str, f: flags.Flags) -> dict:
-    return await _finished(_meta(_pname(handle, f), PROFILE_TTL), lambda: render_profile(handle, f))
+async def profile_media(pid: str, f: flags.Flags) -> dict:
+    return await _finished(_meta(_pname(pid, f), PROFILE_TTL), lambda: render_profile(pid, f))
 
 
 async def _finished(m: dict | None, start) -> dict:
@@ -223,8 +241,12 @@ def _current_cancelled() -> bool:
 
 async def _post(tid: str, f: flags.Flags) -> dict:
     """The post as the flags have it: read to their quote depth, from the
-    quoted post with the quote flag, each video marked."""
-    post = await tweet.fetch(tid, f.depth + f.quote, f.lang)
+    quoted post with the quote flag, each video marked. A note (ss_<id>) has
+    no translation to ask for."""
+    if _site(tid) == "substack":
+        post = await substack.fetch(tid[3:], f.depth + f.quote)
+    else:
+        post = await tweet.fetch(tid, f.depth + f.quote, f.lang)
     if f.quote and post.get("quote"):
         post = post["quote"]
     return flags.apply(post, f)
@@ -277,30 +299,32 @@ async def _render_job(tid: str, f: flags.Flags, info: dict) -> dict:
     return meta
 
 
-async def _profile_board(handle: str, f: flags.Flags) -> tuple[profile.Board, dict]:
+async def _profile_board(pid: str, f: flags.Flags) -> tuple[profile.Board, dict]:
     """The profile as the flags have it, laid out, and what its tags need."""
+    handle = pid.split("_", 1)[1]
+    timeline = substack.timeline if _site(pid) == "substack" else tweet.timeline
     if f.top:
-        data = await tweet.timeline(handle, profile.TOP_FROM)
+        data = await timeline(handle, profile.TOP_FROM)
     else:
-        data = await tweet.timeline(handle, profile.RECENT_FROM, profile.POSTS)
+        data = await timeline(handle, profile.RECENT_FROM, profile.POSTS)
     u, posts = data["user"], profile.pick(data["posts"], f.top)
     b = await asyncio.to_thread(profile.layout, u, posts, f.theme, f.stats, f.lines or profile.LINES, min(1, f.depth), f.top, len(data["posts"]))
-    meta = {"id": f"u_{handle.lower()}", "url": u["url"], "name": u["name"], "handle": u["handle"], "text": tweet.plain_text({"spans": u["bio"]}),
+    meta = {"id": pid.lower(), "url": u["url"], "name": u["name"], "handle": u["handle"], "text": tweet.plain_text({"spans": u["bio"]}),
             "width": b.width, "height": b.height, "ext": "png", "query": f.query()}
     return b, meta
 
 
-async def _profile_job(handle: str, f: flags.Flags, info: dict) -> dict:
+async def _profile_job(pid: str, f: flags.Flags, info: dict) -> dict:
     t0 = time.time()
-    name = _pname(handle, f)
-    b, meta = await _profile_board(handle, f)
+    name = _pname(pid, f)
+    b, meta = await _profile_board(pid, f)
     info["ext"] = "png"
     async with _slots:
         with metrics.running():
             png = await asyncio.to_thread(profile.render, b)
     _write(DIR / f"{name}.png", png)
     _write(DIR / f"{name}.json", json.dumps(meta).encode())
-    log.info("rendered @%s%s %dx%d in %.1fs", handle, f.query(), b.width, b.height, time.time() - t0)
+    log.info("rendered %s%s %dx%d in %.1fs", pid, f.query(), b.width, b.height, time.time() - t0)
     await asyncio.to_thread(_prune)
     return meta
 
@@ -505,7 +529,7 @@ def _og(req: Request, m: dict, bare: bool = False) -> str:
 <meta property="og:image:height" content="{m['height']}">
 </head><body></body></html>"""
     tags = [
-        ("og:site_name", "x.com"), ("og:title", title), ("og:description", m["text"][:300]), ("og:url", m["url"]),
+        ("og:site_name", SITES[_site(m["id"])]), ("og:title", title), ("og:description", m["text"][:300]), ("og:url", m["url"]),
         ("og:image", png), ("og:image:type", kind),
         ("og:image:width", m["width"]), ("og:image:height", m["height"]),
     ]
@@ -580,8 +604,11 @@ def _plain(req: Request, tid: str, post: dict, q: str = "") -> str:
 </head><body></body></html>"""
 
 
-def _to_x(req: Request) -> RedirectResponse:
-    return RedirectResponse(f"https://x.com{req.url.path}{flags.strip(req.query_params)}", status_code=302)
+def _onward(req: Request) -> RedirectResponse:
+    """The same link on the site it was taken from: substack.com for a note
+    or an @ profile, else x.com."""
+    site = "substack.com" if NOTE.match(req.url.path) or SUSER.match(req.url.path) else "x.com"
+    return RedirectResponse(f"https://{site}{req.url.path}{flags.strip(req.query_params)}", status_code=302)
 
 
 @app.get("/healthz")
@@ -591,10 +618,10 @@ async def healthz():
 
 @app.get("/o/{name}")
 async def oembed(name: str, req: Request):
-    m = re.fullmatch(r"(\d{1,20})\.json", name)
+    m = re.fullmatch(r"((?:ss_)?\d{1,20})\.json", name)
     if not m:
         return Response(status_code=404)
-    if (r := await _pass(req, "oembed", m.group(1))):
+    if (r := await _pass(req, "oembed", _owner_key(m.group(1)))):
         return r
     try:
         post = await _post(m.group(1), flags.parse(req.query_params))
@@ -640,19 +667,19 @@ async def _timed(gen, t0: float):
 
 def _owner_key(rid: str) -> str:
     """The number a render's copy is picked by: a post's id, or for a profile
-    (u_<handle>) one made from the handle."""
+    (u_<handle>) or a Substack note or profile one made from its id."""
     return rid if rid.isdigit() else str(int(hashlib.sha1(rid.lower().encode()).hexdigest()[:12], 16))
 
 
 async def _serve(name: str, f: flags.Flags, req: Request):
-    m = re.fullmatch(r"(\d{1,20}|u_[A-Za-z0-9_]{1,15})\.(mp4|png|gif)", name)
+    m = re.fullmatch(r"(\d{1,20}|ss_\d{1,20}|u_[A-Za-z0-9_]{1,15}|su_[A-Za-z0-9_]{1,64})\.(mp4|png|gif)", name)
     if not m:
         return Response(status_code=404)
     tid, ext = m.groups()
     if (r := await _pass(req, "media", _owner_key(tid))):
         return r
-    if not tid.isdigit():
-        return await _serve_profile(tid[2:], ext, f)
+    if tid.startswith(("u_", "su_")):
+        return await _serve_profile(tid, ext, f)
     t0 = time.monotonic()
     stem = _name(tid, f)
     try:
@@ -681,18 +708,18 @@ async def _serve(name: str, f: flags.Flags, req: Request):
                         headers={"Cache-Control": f"public, max-age={RENDER_TTL}"})
 
 
-async def _serve_profile(handle: str, ext: str, f: flags.Flags):
+async def _serve_profile(pid: str, ext: str, f: flags.Flags):
     if ext != "png":
         return Response(status_code=404)
     try:
-        await profile_media(handle, f)
+        await profile_media(pid, f)
     except Busy:
         return Response(status_code=503, headers={"Retry-After": "30"})
     except Cancelled:
         return JSONResponse({"error": "the render was cancelled"}, status_code=410)
     except rs.ResolveError as e:
         return JSONResponse({"error": str(e)}, status_code=404)
-    return FileResponse(DIR / f"{_pname(handle, f)}.png", media_type="image/png", headers={"Cache-Control": f"public, max-age={PROFILE_TTL}"})
+    return FileResponse(DIR / f"{_pname(pid, f)}.png", media_type="image/png", headers={"Cache-Control": f"public, max-age={PROFILE_TTL}"})
 
 
 _cancelled: dict[str, tuple[float, int]] = {}
@@ -760,20 +787,20 @@ async def guide_file(name: str):
     return FileResponse(path, media_type=kind, headers={"Cache-Control": "public, max-age=86400"})
 
 
-async def _profile(req: Request, handle: str, f: flags.Flags, discord: bool):
+async def _profile(req: Request, pid: str, f: flags.Flags, discord: bool):
     """A profile link for a chat app: its image, sent as a post's png is."""
-    if (r := await shard.forward(req, _owner_key(f"u_{handle}"))):
+    if (r := await shard.forward(req, _owner_key(pid))):
         return r
     try:
-        meta = _meta(_pname(handle, f), PROFILE_TTL)
+        meta = _meta(_pname(pid, f), PROFILE_TTL)
         if meta is None:
-            render_profile(handle, f)
-            _, meta = await _profile_board(handle, f)
+            render_profile(pid, f)
+            _, meta = await _profile_board(pid, f)
     except Busy:
-        return _to_x(req)
+        return _onward(req)
     except rs.ResolveError as e:
-        log.info("profile @%s: %s", handle, e)
-        return _to_x(req)
+        log.info("profile %s: %s", pid, e)
+        return _onward(req)
     if f.raw:
         return RedirectResponse(_file(_base(req), meta, "png"), status_code=302)
     return HTMLResponse(_og(req, meta, bare=discord))
@@ -791,25 +818,26 @@ async def me(req: Request):
 @app.get("/{path:path}")
 async def post(path: str, req: Request):
     ua = req.headers.get("user-agent", "")
-    m = STATUS.match(req.url.path)
-    u = None if m else USER.match(req.url.path)
-    if u and u.group(1).lower() in RESERVED:
-        u = None
+    path = req.url.path
+    # the post's render id (a tweet's id, or ss_<id> for a note) or the profile's
+    m, note = STATUS.match(path), NOTE.match(path)
+    tid = m.group(1) if m else f"ss_{note.group(1)}" if note else None
+    u, su = USER.match(path), SUSER.match(path)
+    pid = f"u_{u.group(1)}" if u and u.group(1).lower() not in RESERVED else f"su_{su.group(1)}" if su else None
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)
     bot = discord or bool(BOTS.search(ua))
     if not req.headers.get(shard.PROXIED):
-        kind = "other" if not (m or u) else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
+        kind = "other" if not (tid or pid) else "discord" if discord else "bot" if bot else "raw" if f.raw else "browser"
         metrics.request(kind, _host(req), req.cookies, ua)
-    page = guide.PAGES.get("help" if f.help else "workflows" if f.workflows else req.url.path.strip("/").lower())
+    page = guide.PAGES.get("help" if f.help else "workflows" if f.workflows else path.strip("/").lower())
     if page:
         return _guide(req, page, bot)
-    if u and (bot or f.raw):
-        return await _profile(req, u.group(1), f, discord)
-    if m and (f.cancel or bot or f.raw) and (r := await shard.forward(req, m.group(1))):
+    if pid and (bot or f.raw):
+        return await _profile(req, pid, f, discord)
+    if tid and (f.cancel or bot or f.raw) and (r := await shard.forward(req, _owner_key(tid))):
         return r
-    if m and f.cancel:
-        tid = m.group(1)
+    if tid and f.cancel:
         n = cancel(tid)
         # a chat app's unfurler fetches a link more than once: the later
         # fetches report the cancel the first one made
@@ -822,9 +850,8 @@ async def post(path: str, req: Request):
         if bot:
             return _card(req, "render cancelled" if n else "nothing to cancel", msg)
         return PlainTextResponse(msg + "\n", headers={"Cache-Control": "no-store"})
-    if not m or not (bot or f.raw):
-        return _to_x(req)
-    tid = m.group(1)
+    if not tid or not (bot or f.raw):
+        return _onward(req)
     try:
         meta = _meta(_name(tid, f))
         if meta is None or f.plain:
@@ -842,10 +869,10 @@ async def post(path: str, req: Request):
             render(tid, f)
             meta = await asyncio.to_thread(_pending, tid, post_, f)
     except Busy:
-        return _to_x(req)
+        return _onward(req)
     except rs.ResolveError as e:
         log.info("post %s: %s", tid, e)
-        return _to_x(req)
+        return _onward(req)
     if f.raw or discord and meta["ext"] == "mp4":
         return RedirectResponse(_file(_base(req), meta, meta["ext"]), status_code=302)
     # a png or a gif goes to Discord as a page with the image alone: it plays

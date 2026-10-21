@@ -1,6 +1,8 @@
 """Draw a post the way x.com shows it in a timeline: a 598px column at 2x,
 name and handle, the text with its links in blue, the media grid, the quoted
-post as a card, and the action row with its counts.
+post as a card, and the action row with its counts. A Substack note (site
+"substack") is drawn the same way, in Substack's orange and with its own
+action row, and the article or link it carries as a preview card.
 
 `layout` measures everything from the post's metadata and returns the size
 plus where each video goes; `render` draws it, fetching the images. A video
@@ -39,6 +41,8 @@ THEMES = {
     "dim":   {"bg": "#15202b", "text": "#f7f9f9", "gray": "#8b98a5", "line": "#38444d", "blue": "#1d9bf0", "ph": "#1e2732"},
     "light": {"bg": "#ffffff", "text": "#0f1419", "gray": "#536471", "line": "#cfd9de", "blue": "#1d9bf0", "ph": "#eff3f4"},
 }
+# the accent each site draws its links, badges and marks in, where it isn't x.com's blue
+ACCENTS = {"substack": "#ff6719"}
 MAX_LINES = 30             # a long post is cut with "Show more", as x.com does
 MAX_LINES_QUOTE = 10
 UA = tweet.UA
@@ -424,12 +428,36 @@ ICONS = {
 }
 
 
+# Substack's action row, drawn as outlines 2 wide in the same 24 box (Lucide's
+# heart, message-circle, repeat-2 and share, ISC licensed)
+STROKES = {
+    "s_like": "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z",
+    "s_reply": "M7.9 20A9 9 0 1 0 4 16.1L2 22Z",
+    "s_restack": "m2 9 3-3 3 3M13 18H7a2 2 0 0 1-2-2V6m20 9-3 3-3-3M11 6h6a2 2 0 0 1 2 2v10",
+    "s_share": "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8m-4-6-4-4-4 4M12 2v13",
+}
+
+
+def palette(theme: str, site: str | None = None) -> dict:
+    """A theme's colours, with the site's accent in place of x.com's blue."""
+    T = THEMES.get(theme, THEMES["dark"])
+    return dict(T, blue=ACCENTS[site]) if site in ACCENTS else T
+
+
 def icon(kind: str, px: int, color: str) -> Image.Image:
     """A filled 24-box glyph, drawn at 4x and shrunk for smooth edges."""
     ss = 4
     im = Image.new("RGBA", (px * ss, px * ss), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     k = px * ss / 24
+    if kind in STROKES:
+        w = round(2 * k)
+        for poly in path_polylines(STROKES[kind]):
+            pts = [(x * k, y * k) for x, y in poly]
+            d.line(pts, fill=color, width=w, joint="curve")
+            for x, y in (pts[0], pts[-1]):
+                d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=color)
+        return im.resize((px, px), Image.LANCZOS)
     for poly in path_polylines(ICONS[kind]):
         pts = [(x * k, y * k) for x, y in poly]
         if len(pts) >= 3:
@@ -596,7 +624,7 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
            media_only: bool = False) -> Layout:
     """With `media_only`, the media of the post and each quote it shows,
     stacked edge to edge with nothing else; a post without media is drawn whole."""
-    T = THEMES.get(theme, THEMES["dark"])
+    T = palette(theme, post.get("site"))
     L = Layout(COL * S, 0, T)
     ops = L.ops
 
@@ -685,6 +713,42 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         ops[box_index] = ("box", px(x), px(top), px(w), px(y - top), px(16), T["line"], None)
         return y - top
 
+    def clipped(spans, size, bold, color, w, n):
+        """Text cut at n lines with no "Show more": a card's lines just stop."""
+        t = Text.make(spans, size, 20, bold, color, color, w, n, color)
+        if t.truncated:
+            t.lines = t.lines[:n]
+            t.height = n * t.lh
+        return t
+
+    def link_block(c, x, y, w):
+        """An article or link as a preview card: its image, then where it is
+        from, its title and a line or two of its description."""
+        top = y
+        if c.get("image"):
+            ih = w * 9 / 16
+            ops.append(("image", c["image"], px(x), px(y), px(w), px(ih), px(16), (True, True, False, False), "cover"))
+            y += ih
+        y += 12
+        ix, iw = x + 12, w - 24
+        site = c["site"] + (" · Paid" if c.get("paid") else "")
+        if site:
+            st, _ = _line(site, False, 13, T["gray"], iw)
+            ops.append(("lines", st, px(ix), px(y)))
+            y += 20
+        if c["title"]:
+            t = clipped([{"text": c["title"], "link": False}], 15, True, T["text"], iw, 2)
+            ops.append(("lines", t, px(ix), px(y)))
+            y += t.height
+        if c["text"]:
+            t = clipped([{"text": c["text"], "link": False}], 15, False, T["gray"], iw, 2)
+            ops.append(("lines", t, px(ix), px(y)))
+            y += t.height
+        y += 12
+        # drawn last, so its edge lies over the image's
+        ops.append(("box", px(x), px(top), px(w), px(y - top), px(16), T["line"], None))
+        return y - top
+
     y = PAD
     x0, cw = PAD + AVATAR + GAP, COL - PAD - AVATAR - GAP - PAD
     ops.append(("avatar", post["avatar"], px(PAD), px(y), px(AVATAR)))
@@ -716,9 +780,23 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     if post.get("quote"):
         y += 12
         y += quote_block(post["quote"], x0, y, cw, 9)
+    if post.get("card"):
+        y += 12
+        y += link_block(post["card"], x0, y, cw)
     # actions
     y += 12
-    if stats:
+    if stats and post.get("site") == "substack":
+        # Substack's order, and no views or bookmarks
+        groups = [("s_like", count(post["likes"])), ("s_reply", count(post["replies"])), ("s_restack", count(post["reposts"]))]
+        step = (cw - 18.75 - 20) / len(groups)
+        for i, (k, c) in enumerate(groups):
+            gx = x0 + i * step
+            ops.append(("icon", k, px(gx), px(y + 6), px(18.75), T["gray"]))
+            if c:
+                ops.append(("text", c, "regular", 13, px(gx + 18.75 + 8), px(y + 8), T["gray"]))
+        ops.append(("icon", "s_share", px(x0 + cw - 18.75), px(y + 6), px(18.75), T["gray"]))
+        y += 32
+    elif stats:
         groups = [("reply", count(post["replies"])), ("repost", count(post["reposts"])), ("like", count(post["likes"]))]
         if post.get("views") is not None:
             groups.append(("views", count(post["views"])))

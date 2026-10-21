@@ -27,6 +27,10 @@ own preview. Discord is redirected to the mp4 at once and streamed it while
 it renders, so it plays like an upload; other link-preview fetchers get Open
 Graph tags; a browser goes on to x.com. Run it with `uvicorn app.embed:app`.
 
+Substack notes work the same way (`app/substack.py`): swap `substack.com` for
+the embed domain in `/@<user>/note/c-<id>`, or `/@<user>` for the profile with
+their latest notes. The flags apply as on x.com, except `lang`.
+
 A profile link (`/<user>`) unfurls as an image of the profile: its header and
 the user's 6 latest posts in two columns (`app/profile.py`). `/help` and
 `/workflows` are the guide (`app/guide.py`): every flag, and the combinations
