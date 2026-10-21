@@ -27,7 +27,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from . import tweet
-from .resolve import assert_public
+from .resolve import MAX_REDIRECTS, assert_public, public_transport_sync
 
 log = logging.getLogger("convert.card")
 
@@ -208,6 +208,7 @@ _img_cache: dict[str, tuple[float, bytes | None]] = {}
 _img_lock = threading.Lock()
 IMG_TTL = 15 * 60
 IMG_MAX = 15 << 20
+IMG_FORMATS = ("JPEG", "PNG", "WEBP", "GIF")    # what x.com, twemoji and the link cards serve; no other decoder sees fetched bytes
 
 
 def fetch_bytes(url: str, timeout: float = 12) -> bytes | None:
@@ -218,10 +219,18 @@ def fetch_bytes(url: str, timeout: float = 12) -> bytes | None:
     data = None
     try:
         assert_public(url)
-        with httpx.Client(headers={"User-Agent": UA}, follow_redirects=True, timeout=timeout) as c:
-            r = c.get(url)
-            if r.status_code < 400 and len(r.content) <= IMG_MAX:
-                data = r.content
+        # read up to the cap and no further; identity, so a compressed body can't inflate far past it
+        with httpx.Client(headers={"User-Agent": UA, "Accept-Encoding": "identity"}, transport=public_transport_sync(),
+                          follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=timeout) as c, c.stream("GET", url) as r:
+            size = r.headers.get("content-length", "")
+            if r.status_code < 400 and not (size.isdigit() and int(size) > IMG_MAX):
+                buf = bytearray()
+                for chunk in r.iter_bytes():
+                    buf += chunk
+                    if len(buf) > IMG_MAX:
+                        break
+                else:
+                    data = bytes(buf)
     except Exception as e:
         log.debug("fetch %s: %s", url[:80], type(e).__name__)
     with _img_lock:
@@ -239,7 +248,7 @@ def fetch_image(url: str | None) -> Image.Image | None:
     if not b:
         return None
     try:
-        im = Image.open(io.BytesIO(b))
+        im = Image.open(io.BytesIO(b), formats=IMG_FORMATS)
         im.load()
         return im.convert("RGBA")
     except Exception:

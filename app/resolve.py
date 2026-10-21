@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+import httpcore
+import httpx
 import yt_dlp
 
 log = logging.getLogger("convert.resolve")
@@ -44,6 +46,9 @@ class _Logger:
         log.debug("yt-dlp: %s", msg)
 
 
+MAX_REDIRECTS = 5
+
+
 def assert_public(url: str) -> None:
     """Refuse anything that points inside the network. yt-dlp's generic extractor
     will fetch whatever it is given, so this is the SSRF check at the app layer;
@@ -51,14 +56,80 @@ def assert_public(url: str) -> None:
     p = urlparse(url)
     if p.scheme not in ("http", "https") or not p.hostname:
         raise ResolveError("that doesn't look like a link")
+    public_addresses(p.hostname)
+
+
+def public_addresses(host: str) -> list[str]:
+    """What `host` resolves to, refused unless every address is public."""
     try:
-        infos = socket.getaddrinfo(p.hostname, None)
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except socket.gaierror:
         raise ResolveError("that host doesn't resolve") from None
+    out: list[str] = []
     for _fam, _t, _p, _c, sa in infos:
         ip = ipaddress.ip_address(sa[0])
         if not ip.is_global:
             raise ResolveError("that address isn't reachable from here")
+        if sa[0] not in out:
+            out.append(sa[0])
+    return out
+
+
+# assert_public checks the link someone pasted; these check every connection
+# httpx opens, so a redirect hop is checked too, and the socket goes to the
+# address that was checked, not to a second lookup that could answer differently.
+
+class _Public(httpcore.AsyncNetworkBackend):
+    def __init__(self, inner: httpcore.AsyncNetworkBackend):
+        self.inner = inner
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        err: Exception | None = None
+        for ip in await asyncio.to_thread(public_addresses, host):
+            try:
+                return await self.inner.connect_tcp(ip, port, timeout=timeout, local_address=local_address, socket_options=socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                err = e
+        raise err or ResolveError("that host doesn't resolve")
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise ResolveError("that address isn't reachable from here")
+
+    async def sleep(self, seconds: float) -> None:
+        await self.inner.sleep(seconds)
+
+
+class _PublicSync(httpcore.NetworkBackend):
+    def __init__(self, inner: httpcore.NetworkBackend):
+        self.inner = inner
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        err: Exception | None = None
+        for ip in public_addresses(host):
+            try:
+                return self.inner.connect_tcp(ip, port, timeout=timeout, local_address=local_address, socket_options=socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                err = e
+        raise err or ResolveError("that host doesn't resolve")
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        raise ResolveError("that address isn't reachable from here")
+
+    def sleep(self, seconds: float) -> None:
+        self.inner.sleep(seconds)
+
+
+def public_transport(**kw) -> httpx.AsyncHTTPTransport:
+    """An httpx transport that only connects to public addresses."""
+    t = httpx.AsyncHTTPTransport(**kw)
+    t._pool._network_backend = _Public(t._pool._network_backend)
+    return t
+
+
+def public_transport_sync(**kw) -> httpx.HTTPTransport:
+    t = httpx.HTTPTransport(**kw)
+    t._pool._network_backend = _PublicSync(t._pool._network_backend)
+    return t
 
 
 def ydl_opts() -> dict[str, Any]:

@@ -10,7 +10,7 @@ import time
 from typing import AsyncIterator
 
 from . import id3, tunnel
-from .plan import Plan, build_inputs, shell
+from .plan import PROTOCOLS, Plan, build_inputs, shell
 from .resolve import Fmt, ResolveError, assert_public
 
 log = logging.getLogger("convert.stream")
@@ -47,7 +47,7 @@ async def cover_jpeg(url: str) -> bytes | None:
     try:
         assert_public(url)
         proc = await asyncio.create_subprocess_exec(
-            FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-i", url,
+            FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", *PROTOCOLS, "-i", url,
             "-frames:v", "1", "-vf", "scale='min(600,iw)':-2", "-c:v", "mjpeg", "-q:v", "4", "-f", "image2pipe", "pipe:1",
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await asyncio.wait_for(proc.communicate(), 15)

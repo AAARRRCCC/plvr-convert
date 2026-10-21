@@ -155,13 +155,17 @@ def _container(o: dict, v: Fmt, a: Fmt | None) -> str:
     return "mkv"
 
 
+# What ffmpeg may open for an input whose bytes come from outside. Whatever the
+# extension says, ffmpeg probes the content, so any input can turn out to be an
+# HLS playlist naming its own segment and key URLs: nothing local is on the list.
+PROTOCOLS = ["-protocol_whitelist", "http,https,tcp,tls,crypto"]
+
+
 def _in_args(f: Fmt, start: float | None, url: str) -> list[str]:
     """One -i and what goes before it. `url` is what ffmpeg should open: the
     loopback tunnel for a plain file, the upstream URL itself for an HLS playlist."""
-    args: list[str] = []
-    if f.protocol == "m3u8":
-        args += ["-protocol_whitelist", "file,http,https,tcp,tls,crypto,hls"]
-    else:
+    args: list[str] = list(PROTOCOLS)
+    if f.protocol != "m3u8":
         args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
     if f.headers and url == f.url:
         ua = f.headers.get("User-Agent")
@@ -181,7 +185,7 @@ def build_inputs(plan: Plan, start: float | None, urlfor=lambda f: f.url) -> lis
     for f in plan.inputs:
         args += _in_args(f, start, urlfor(f))
     if plan.cover and not plan.tags:  # an mp3 cover goes into the tag instead, see app.id3
-        args += ["-i", plan.cover]
+        args += PROTOCOLS + ["-i", plan.cover]
     return args
 
 

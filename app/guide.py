@@ -285,7 +285,7 @@ def _layout(c: _Canvas, p: Page, host: str) -> int:
     head = 10 + TETO_H + 4 + 30 + 12
     c.grad((x0, y0, right, y0 + head), *C["banner"], gloss=True)
     if c.im is not None:
-        pic = Image.open(TETO).convert("RGBA")
+        pic = Image.open(TETO, formats=("PNG",)).convert("RGBA")
         pic = pic.resize((round(pic.width * TETO_H / pic.height), TETO_H), Image.LANCZOS)
         c.im.paste(pic, (mid - pic.width // 2, y0 + 10), pic)
     title = _f("bold", 26)

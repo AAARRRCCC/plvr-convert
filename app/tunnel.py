@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from starlette.routing import Route
 
-from .resolve import Fmt, ResolveError, assert_public
+from .resolve import MAX_REDIRECTS, Fmt, ResolveError, assert_public, public_transport
 
 log = logging.getLogger("convert.tunnel")
 
@@ -37,7 +37,8 @@ _client: httpx.AsyncClient | None = None
 def client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30, read=60), http2=False)
+        _client = httpx.AsyncClient(transport=public_transport(http2=False), follow_redirects=True, max_redirects=MAX_REDIRECTS,
+                                    timeout=httpx.Timeout(30, read=60))
     return _client
 
 

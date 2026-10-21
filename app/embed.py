@@ -371,7 +371,7 @@ async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
     argv = [shot.FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
     if f.start:
         argv += ["-ss", f"{f.start:.3f}"]
-    argv += ["-i", shot._urlfor(shot._fmt(item))]
+    argv += planning.PROTOCOLS + ["-i", shot._urlfor(shot._fmt(item))]
     if f.end:
         argv += ["-t", f"{f.end - f.start:.3f}"]
     tmp = dest.with_name(dest.name + ".tmp")

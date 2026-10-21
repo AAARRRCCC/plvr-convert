@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator
 
 from . import card, tweet
-from .plan import FRAG, Plan, filename, shell
+from .plan import FRAG, PROTOCOLS, Plan, filename, shell
 from .resolve import Fmt, ResolveError, assert_public
 from .stream import CHUNK, FFMPEG, FIRST_BYTE_TIMEOUT, Started, _kill, _rest, _urlfor
 
@@ -96,7 +96,7 @@ def _probe(item: dict) -> float:
     """A video's length read from the file itself, 0 if it can't be."""
     try:
         assert_public(item["url"])
-        out = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", _urlfor(_fmt(item))],
+        out = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", *PROTOCOLS, _urlfor(_fmt(item))],
                              capture_output=True, text=True, timeout=15).stdout
         return max(0.0, float(out.strip() or 0))
     except (OSError, subprocess.SubprocessError, ValueError, ResolveError) as e:
@@ -147,7 +147,7 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
                 argv += ["-stream_loop", str(shot.loops)]
             if shot.start:
                 argv += ["-ss", f"{shot.start:.3f}"]
-        argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
+        argv += PROTOCOLS + ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5", "-i", _urlfor(f)]
     parts, out, master = _graph(L)
     dur = float(p.args[0]) if p.args else 0
     argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]"]
