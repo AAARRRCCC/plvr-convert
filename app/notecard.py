@@ -287,7 +287,7 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
             y += 18
             ops.append(("box", px(x0), px(y), px(w), S, 0, None, T["line"]))
             y += 17
-            tally = " ∙ ".join(s for s in (_tally(post["likes"], "Like"), _tally(post["reposts"], "Restack")) if s)
+            tally = " · ".join(s for s in (_tally(post["likes"], "Like"), _tally(post["reposts"], "Restack")) if s)
             if tally:
                 t, _ = _line(tally, False, 13, T["gray"], w / 2)
                 ops.append(("lines", t, px(x0), px(y)))

@@ -155,6 +155,69 @@ def test_a_grid_fills_the_column_when_an_arrangement_fits():
     assert boxes[0][1] > 0 and h == pytest.approx(514 * card.GRID_MAX)
 
 
+# ----------------------------------------------------------------- thread ---
+
+def test_the_thread_flag():
+    assert flags.parse({"thread": ""}).thread == flags.MAX_THREAD
+    assert [flags.parse({"thread": v}).thread for v in ("2", "99", "0", "no")] == [2, flags.MAX_THREAD, 0, 0]
+    assert flags.parse({"thread": "2"}).query() == "?thread=2" and flags.parse({}).thread == 0
+
+
+def reply(i: int, to: int | None, handle: str = "someone", media: list | None = None) -> dict:
+    """Post i, a reply to post `to` by someone else."""
+    to = None if to is None else str(to)
+    return dict(post(i, media=media), handle=handle, replying_to=to and "other", replying_to_id=to)
+
+
+@pytest.fixture
+def chain(monkeypatch):
+    """Posts 1 <- 2 <- 3 <- 4 <- 5, each answering the one before; 0 is gone."""
+    posts = {str(i): reply(i, i - 1 if i > 1 else 0) for i in range(1, 6)}
+    asked = []
+
+    async def fetch(tid, depth, lang=None):
+        asked.append(tid)
+        if tid not in posts:
+            raise tweet.Missing("that post doesn't exist, or was deleted")
+        return posts[tid]
+    monkeypatch.setattr(tweet, "fetch", fetch)
+    return posts, asked
+
+
+def test_a_thread_is_read_up_from_the_reply(chain):
+    posts, asked = chain
+    got = asyncio.run(tweet.thread(posts["5"], 2, 1))
+    assert [p["id"] for p in got] == ["3", "4"] and asked == ["4", "3"]
+    # up to a post that's gone (1 answers 0), or where the conversation starts
+    asked.clear()
+    assert [p["id"] for p in asyncio.run(tweet.thread(posts["5"], 8, 1))] == ["1", "2", "3", "4"] and asked[-1] == "0"
+    assert asyncio.run(tweet.thread(reply(9, None), 8, 1)) == []
+
+
+def test_the_embed_draws_a_reply_under_its_thread(chain):
+    posts, asked = chain
+    f = flags.parse({"thread": "2"})
+    p = asyncio.run(embed._post("5", f))
+    assert [q["id"] for q in p["thread"]] == ["3", "4"] and "thread" not in posts["5"]   # the cached post is left alone
+    assert embed._name("5", f) != embed._name("5", flags.parse({}))
+    assert "thread" not in asyncio.run(embed._post("5", flags.parse({})))
+
+
+def test_a_thread_is_joined_like_a_conversation():
+    video = {"kind": "video", "url": "v", "poster": None, "w": 1280, "h": 720, "duration": 10.0}
+    thread = [reply(1, 0, media=[dict(video)]), reply(2, 1)]
+    L = card.layout(dict(reply(3, 2, media=[dict(video)]), thread=thread))
+    said = [op[1] for op in L.ops if op[0] == "text" and op[1].startswith("Replying to")]
+    # only the top one says whom it answers: the others have it right above
+    assert said == ["Replying to @other"]
+    joins = [op for op in L.ops if op[0] == "box" and op[3] == 2 * card.S]
+    assert len(joins) == 2
+    # a video above is its still: the render's one is the reply's
+    assert len(L.cells) == 1 and L.cells[0].y > joins[-1][2]
+    alone = card.layout(reply(3, 2, media=[dict(video)]))
+    assert L.height > alone.height and len(alone.cells) == 1
+
+
 def test_top_picks_the_most_liked():
     posts = [post(i, likes=l) for i, l in enumerate([5, 50, 1, 40, 30, 2, 20, 10])]
     assert [p["likes"] for p in profile.pick(posts, True)] == [50, 40, 30, 20, 10, 5]

@@ -40,7 +40,7 @@ Substack notes work the same way (`app/substack.py`) on the embed domain's
 `substack.com` in `/@<user>/note/c-<id>`, or `/@<user>` for the profile with
 their latest notes. A note is drawn as substack.com shows it on its own page
 (`app/notecard.py`), with its date in `NOTE_TZ`. The flags apply as on x.com,
-except `lang`. The same paths on the embed domain itself, the older form,
+except `lang` and `thread`. The same paths on the embed domain itself, the older form,
 still work.
 
 A profile link (`/<user>`) unfurls as an image of the profile: its header and
@@ -57,6 +57,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `v` | the same | every video; a numbered flag wins |
 | `q` | `0`-`3` | quote depth (default 1) |
 | `quote` | | start from the quoted post, leaving the top one out |
+| `thread` | a number | a reply under the posts it answers, joined as x.com draws a conversation: bare, up to 8; a number, that many. Their videos are stills |
 | `lang` | `es`, `ja`, `fr`, ... | translate the text (fxtwitter's translation), with "Translated from ..." under it |
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |

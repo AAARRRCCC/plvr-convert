@@ -125,6 +125,21 @@ async def fetch(tid: str, depth: int, lang: str | None = None) -> dict:
     return post
 
 
+async def thread(post: dict, n: int, depth: int, lang: str | None = None) -> list[dict]:
+    """Up to `n` of the posts a reply answers, each read to `depth`, the
+    first of the conversation first. It stops early at one that can't be
+    read, deleted or private, and the ones under it are drawn without it."""
+    chain, p = [], post
+    while len(chain) < n and p.get("replying_to_id"):
+        try:
+            p = await fetch(p["replying_to_id"], depth, lang)
+        except rs.ResolveError as e:
+            log.info("thread above %s stops at %s: %s", post["id"], p["replying_to_id"], e)
+            break
+        chain.append(p)
+    return chain[::-1]
+
+
 _reading: dict[str, asyncio.Task] = {}   # timelines being read, so a page and its render share one read
 
 
@@ -331,6 +346,7 @@ def _normalize(raw: dict) -> dict:
         "views": int(raw.get("views") or 0) if raw.get("views") is not None else None,
         "bookmarks": int(raw.get("bookmarks") or 0),
         "replying_to": reply or None,
+        "replying_to_id": str(raw.get("replying_to_status") or "") or None,
         "media": _media(raw),
         "quote": None,
     }

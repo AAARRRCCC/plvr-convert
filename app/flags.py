@@ -13,6 +13,8 @@ flag with a value it can't read.
     q            quote depth 0-3 (default 1)
     quote        start from the post it quotes, leaving the top post out; the
     (or inner)   other flags, video numbers too, count from there
+    thread       a reply drawn under the posts it answers, up to MAX_THREAD
+                 of them; thread=2 stops at two. Their videos are stills
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
     lang         translate the text into this language (es, ja, fr, de, ...)
@@ -46,7 +48,8 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "inner", "lang", "top", "workflows"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+MAX_THREAD = 8
+NAMES = {"v", "q", "thread", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "inner", "lang", "top", "workflows"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -69,6 +72,7 @@ class Flags:
     lines: int | None = None
     media: bool = False
     quote: bool = False
+    thread: int = 0            # how many posts the reply answers to draw above it
     top: bool = False
     lang: str | None = None
     start: float = 0.0
@@ -92,6 +96,8 @@ class Flags:
             q.append(("quote", 1))
         if self.depth != DEPTH:
             q.append(("q", self.depth))
+        if self.thread:
+            q.append(("thread", self.thread))
         if not self.stats:
             q.append(("stats", 0))
         if self.theme != "dark":
@@ -156,6 +162,9 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
+        elif k == "thread" and (v.isdigit() or _bool(v) is not None):
+            # bare, the whole chain up to MAX_THREAD; a number, that many
+            kw["thread"] = min(MAX_THREAD, int(v)) if v.isdigit() else MAX_THREAD * _bool(v)
         elif k in ("stats", "plain", "raw", "cancel", "media", "help", "workflows", "quote", "top") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:

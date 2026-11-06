@@ -54,6 +54,7 @@ HELP = Page(
     "{host}/user/status/123?media&q=0",
     "Flags",
     _items(("media", "media only"), ("inner", "only the inner post"), ("q=0..3", "how many inner posts deep"),
+           ("thread", "with the replies above it (thread=2: two)"),
            ("v2=image", "2nd video as a still (or mute, sound, hide)"), ("v=image", "every video"),
            ("lines=5", "cut the text"), ("stats=0", "no counts"), ("theme=light", "or dim"), ("lang=ja", "translate"),
            ("start=1:30&end=1:45", "clip"), ("plain", "x.com's own video"),

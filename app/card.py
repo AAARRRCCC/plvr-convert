@@ -783,10 +783,10 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
             ops.append(("frame", px(x), px(y), px(w), px(h), px(radius), corners, T["line"]))
         return h
 
-    chain, p = [], post
-    while p:
-        chain.append(p)
-        p = p.get("quote")
+    # the replies a post answers, when the thread flag drew them above it:
+    # their videos are stills, the render's length and sound the post's own
+    thread = [_stills(p) for p in post.get("thread") or []]
+    chain = [q for p in thread for q in _quotes(p)] + _quotes(post)
     if media_only and any(p["media"] for p in chain):
         y = 0
         for p in chain:
@@ -845,57 +845,87 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         ops[box_index] = ("box", px(x), px(top), px(w), px(y - top), px(16), T["line"], None)
         return y - top
 
-    y = PAD
     x0, cw = PAD + AVATAR + GAP, COL - PAD - AVATAR - GAP - PAD
-    ops.append(("avatar", post["avatar"], px(PAD), px(y), px(AVATAR)))
-    # header line
-    badge = 20 if post["verified"] else 0
-    tail = f"@{post['handle']} · {tweet.relative(post['created'], now)}"
-    tail_w = fonts().font("regular", 15 * S).getlength(tail) / S
-    name_t, name_w = _line(post["name"], True, 15, T["text"], max(80, cw - badge - 4 - tail_w))
-    ops.append(("lines", name_t, px(x0), px(y)))
-    cx = x0 + name_w
-    if post["verified"]:
-        ops.append(("icon", "verified", px(cx + 2), px(y + 1), px(18), T["blue"]))
-        cx += badge
-    ops.append(("text", tail, "regular", 15, px(cx + 4), px(y), T["gray"]))
-    y += 20
-    if post.get("replying_to"):
-        ops.append(("text", f"Replying to @{post['replying_to']}", "regular", 15, px(x0), px(y), T["gray"], T["blue"]))
+
+    def one(post, y, answered, answering):
+        """A post from `y`; returns where the next one starts. A post whose
+        parent is `answered` above it doesn't say whom it replies to, and one
+        `answering` the post below it has a line down from its avatar to that
+        one's, as x.com draws a conversation."""
+        top = y
+        ops.append(("avatar", post["avatar"], px(PAD), px(y), px(AVATAR)))
+        # header line
+        badge = 20 if post["verified"] else 0
+        tail = f"@{post['handle']} · {tweet.relative(post['created'], now)}"
+        tail_w = fonts().font("regular", 15 * S).getlength(tail) / S
+        name_t, name_w = _line(post["name"], True, 15, T["text"], max(80, cw - badge - 4 - tail_w))
+        ops.append(("lines", name_t, px(x0), px(y)))
+        cx = x0 + name_w
+        if post["verified"]:
+            ops.append(("icon", "verified", px(cx + 2), px(y + 1), px(18), T["blue"]))
+            cx += badge
+        ops.append(("text", tail, "regular", 15, px(cx + 4), px(y), T["gray"]))
         y += 20
-    if post["spans"]:
-        t = Text.make(post["spans"], 15, 20, False, T["text"], T["blue"], cw, max_lines, T["blue"])
-        ops.append(("lines", t, px(x0), px(y)))
-        y += t.height
-    if post.get("translated"):
-        ops.append(("text", f"Translated from {post['translated']}", "regular", 13, px(x0), px(y + 4), T["gray"]))
-        y += 22
-    if post["media"]:
+        if post.get("replying_to") and not answered:
+            ops.append(("text", f"Replying to @{post['replying_to']}", "regular", 15, px(x0), px(y), T["gray"], T["blue"]))
+            y += 20
+        if post["spans"]:
+            t = Text.make(post["spans"], 15, 20, False, T["text"], T["blue"], cw, max_lines, T["blue"])
+            ops.append(("lines", t, px(x0), px(y)))
+            y += t.height
+        if post.get("translated"):
+            ops.append(("text", f"Translated from {post['translated']}", "regular", 13, px(x0), px(y + 4), T["gray"]))
+            y += 22
+        if post["media"]:
+            y += 12
+            y += media_block(post["media"], x0, y, cw, (True, True, True, True), False)
+        if post.get("quote"):
+            y += 12
+            y += quote_block(post["quote"], x0, y, cw, 9)
+        # actions
         y += 12
-        y += media_block(post["media"], x0, y, cw, (True, True, True, True), False)
-    if post.get("quote"):
-        y += 12
-        y += quote_block(post["quote"], x0, y, cw, 9)
-    # actions
-    y += 12
-    if stats:
-        groups = [("reply", count(post["replies"])), ("repost", count(post["reposts"])), ("like", count(post["likes"]))]
-        if post.get("views") is not None:
-            groups.append(("views", count(post["views"])))
-        last_w = 18.75 * 2 + 20
-        step = (cw - last_w - 20) / len(groups)
-        for i, (k, c) in enumerate(groups):
-            gx = x0 + i * step
-            ops.append(("icon", k, px(gx), px(y + 6), px(18.75), T["gray"]))
-            if c:
-                ops.append(("text", c, "regular", 13, px(gx + 18.75 + 8), px(y + 8), T["gray"]))
-        ops.append(("icon", "bookmark", px(x0 + cw - last_w), px(y + 6), px(18.75), T["gray"]))
-        ops.append(("icon", "share", px(x0 + cw - 18.75), px(y + 6), px(18.75), T["gray"]))
-        y += 32
-    y += PAD - 4
+        if stats:
+            groups = [("reply", count(post["replies"])), ("repost", count(post["reposts"])), ("like", count(post["likes"]))]
+            if post.get("views") is not None:
+                groups.append(("views", count(post["views"])))
+            last_w = 18.75 * 2 + 20
+            step = (cw - last_w - 20) / len(groups)
+            for i, (k, c) in enumerate(groups):
+                gx = x0 + i * step
+                ops.append(("icon", k, px(gx), px(y + 6), px(18.75), T["gray"]))
+                if c:
+                    ops.append(("text", c, "regular", 13, px(gx + 18.75 + 8), px(y + 8), T["gray"]))
+            ops.append(("icon", "bookmark", px(x0 + cw - last_w), px(y + 6), px(18.75), T["gray"]))
+            ops.append(("icon", "share", px(x0 + cw - 18.75), px(y + 6), px(18.75), T["gray"]))
+            y += 32
+        y += PAD - 4
+        if answering:
+            ops.append(("box", px(PAD + AVATAR / 2 - 1), px(top + AVATAR + 4), px(2), px(y - 4 - (top + AVATAR + 4)), 0, None, T["line"]))
+        return y
+
+    y = PAD
+    for i, p in enumerate(thread):
+        y = one(p, y, i > 0, True)
+    y = one(post, y, bool(thread), False)
     h = px(y)
     L.height = h + (h % 2)
     return _lead_cell(L)
+
+
+def _quotes(post: dict) -> list[dict]:
+    """The post and each post it quotes, in order."""
+    out = []
+    while post:
+        out.append(post)
+        post = post.get("quote")
+    return out
+
+
+def _stills(post: dict) -> dict:
+    """A copy with every video and gif, its quotes' too, drawn as its still."""
+    q = post.get("quote")
+    return dict(post, media=[m if m["kind"] == "photo" else dict(m, still=True) for m in post["media"]],
+                quote=_stills(q) if q else None)
 
 
 def _lead_cell(L: Layout) -> Layout:

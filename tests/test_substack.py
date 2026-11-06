@@ -154,10 +154,10 @@ def test_a_note_draws_as_substack_shows_it():
     # no publication of their own: no Subscribe
     assert not any(op[0] == "fill" and op[-1] == (255, 103, 25, 255) for op in L.ops)
     # the likes and restacks under the rule; no replies there
-    assert "5 Likes ∙ 2 Restacks" in words(L)
+    assert "5 Likes · 2 Restacks" in words(L)
     card.render(L)
     # in a profile's board: nothing under the action row
-    assert "5 Likes ∙ 2 Restacks" not in words(card.layout(p, feed=True))
+    assert "5 Likes · 2 Restacks" not in words(card.layout(p, feed=True))
 
 
 def words(L: card.Layout) -> list[str]:

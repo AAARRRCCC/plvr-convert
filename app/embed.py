@@ -252,14 +252,17 @@ def _current_cancelled() -> bool:
 
 async def _post(tid: str, f: flags.Flags) -> dict:
     """The post as the flags have it: read to their quote depth, from the
-    quoted post with the quote flag, each video marked. A note (ss_<id>) has
-    no translation to ask for."""
+    quoted post with the quote flag, under the posts it answers with the
+    thread flag, each video marked. A note (ss_<id>) has no translation to
+    ask for, and its thread isn't drawn."""
     if _site(tid) == "substack":
         post = await substack.fetch(tid[3:], f.depth + f.quote)
     else:
         post = await tweet.fetch(tid, f.depth + f.quote, f.lang)
     if f.quote and post.get("quote"):
         post = post["quote"]
+    elif f.thread and post.get("replying_to_id"):
+        post = dict(post, thread=await tweet.thread(post, f.thread, f.depth, f.lang))
     return flags.apply(post, f)
 
 
