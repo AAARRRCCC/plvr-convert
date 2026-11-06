@@ -17,10 +17,12 @@ the file is repacked with its index up front, and from then on it is served
 whole, with ranges, since chat apps seek in a video instead of reading it
 once. Discord reads the whole file before it shows the preview and gives up
 after about ten seconds, so the bitrate is set to keep the file near
-TARGET_MB, and a video longer than LONG_VIDEO, which takes longer than that
-to compose, is not drawn: the post goes out as a plain embed, name, text and
-x.com's own video file. The render flag draws it anyway, up to MAX_FORCED;
-Discord may then cut the preview short until the render is done.
+TARGET_MB, and a longer video is drawn smaller: the mp4's canvas shrinks from
+the png's 2x towards 1x until the render fits RENDER_BUDGET, and each video
+is read from the smallest of its files that fills its cell. A render that
+still runs past Discord's wait is cut short in the preview. A video longer
+than MAX_RENDER is not drawn: the post goes out as a plain embed, name, text
+and the site's own video file.
 
 Flags in the link's query string (v2=image, q=0, theme=light, start=0:30 ...)
 change the render; flags.py lists them. Each set of flags is its own render,
@@ -57,10 +59,12 @@ Run with
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import html
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -87,8 +91,12 @@ PROFILE_TTL = int(os.environ.get("PROFILE_TTL", 600))   # a profile's latest pos
 MAX_BYTES = int(os.environ.get("EMBED_MAX_MB", 1500)) << 20
 RENDERS = int(os.environ.get("RENDERS", 2))          # ffmpeg processes at once
 QUEUE = int(os.environ.get("RENDER_QUEUE", 20))      # posts waiting or rendering
-LONG_VIDEO = float(os.environ.get("LONG_VIDEO", 20))  # seconds
-MAX_FORCED = float(os.environ.get("MAX_FORCED", 180))  # seconds: the longest the render flag draws
+MAX_RENDER = float(os.environ.get("MAX_RENDER", shot.MAX_DURATION))  # seconds: a longer video goes out as the site's own file
+# what ffmpeg composes inside Discord's wait, in megapixel-frames (canvas
+# pixels times frames): about 8s at the ~115 a node managed in the cluster's
+# logs. Each render logs its own rate, to tune this by.
+RENDER_BUDGET = float(os.environ.get("RENDER_BUDGET", 900))
+MIN_SCALE = 0.5   # of the 2x canvas: a pixel per css pixel, below which the text is hard to read
 PRESET = os.environ.get("X264_PRESET", "superfast")
 # Discord downloads the whole video while it builds the preview and gives up
 # after about ten seconds, so the file is held to a size the house uplink
@@ -397,11 +405,15 @@ async def _gif(item: dict, dest: Path, f: flags.Flags) -> None:
 async def _mp4(s: shot.Shot, dest: Path) -> None:
     """Compose straight into dest as a fragmented mp4, so it can be streamed
     while it grows; the json written after it is what marks it finished."""
-    holes = await asyncio.to_thread(card.render, s.layout, True)
-    # a keyframe every 2s: each fragment starts at one, so the first is out quickly
     dur = float(s.plan.args[0]) if s.plan.args else 0
+    k = _scale(s.layout, dur)
+    small = dataclasses.replace(s, layout=shot.scaled(s.layout, k))
+    holes, _ = await asyncio.gather(asyncio.to_thread(card.render, s.layout, True, (small.layout.width, small.layout.height)),
+                                    _files(small))
+    # a keyframe every 2s: each fragment starts at one, so the first is out quickly
     kbps = int(min(MAXRATE_KBPS, max(400, TARGET_MB * 8000 / dur - 160))) if dur else MAXRATE_KBPS
-    argv = shot.command(s, PRESET) + ["-g", "60", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-f", "mp4", "-movflags", FRAG, str(dest)]
+    argv = shot.command(small, PRESET) + ["-g", "60", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-f", "mp4", "-movflags", FRAG, str(dest)]
+    t0 = time.monotonic()
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     try:
         _, err = await asyncio.wait_for(proc.communicate(holes), RENDER_TIMEOUT)
@@ -417,6 +429,10 @@ async def _mp4(s: shot.Shot, dest: Path) -> None:
     if proc.returncode != 0:
         lines = err.decode(errors="replace").strip().splitlines()
         raise rs.ResolveError("the video couldn't be composed: " + (lines[-1][:160] if lines else "unknown error"))
+    took = time.monotonic() - t0
+    W, H = small.layout.width, small.layout.height
+    log.info("composed %s at %.2f of 2x, %dx%d, %.0fs of video in %.1fs: %.0f megapixel-frames/s", dest.stem, k, W, H, dur, took,
+             W * H / 1e6 * dur * shot.FPS / took if took else 0)
     # repack with the index up front for players that seek; a stream still
     # reading the fragmented file keeps its handle, and if the swap fails
     # the fragmented file plays as it is
@@ -431,6 +447,29 @@ async def _mp4(s: shot.Shot, dest: Path) -> None:
             packed.unlink(missing_ok=True)
     else:
         packed.unlink(missing_ok=True)
+
+
+def _scale(L: card.Layout, dur: float) -> float:
+    """How much of the 2x canvas the mp4 is drawn at: all of it when the
+    render fits RENDER_BUDGET, less for a longer video, down to MIN_SCALE.
+    A video of unknown length is drawn whole."""
+    if not dur:
+        return 1.0
+    work = L.width * L.height / 1e6 * dur * shot.FPS
+    return max(MIN_SCALE, min(1.0, math.sqrt(RENDER_BUDGET / work)))
+
+
+async def _files(s: shot.Shot) -> None:
+    """A note's uploaded video is a redirect to one of several files: ask
+    which, so the render can read the smallest that fills its cell."""
+    if s.post.get("site") != substack.SITE:
+        return
+    cells = [c for c in s.layout.cells if c.item.get("kind") == "video" and not c.item.get("variants")]
+    found = await asyncio.gather(*(substack.files(c.item) for c in cells))
+    for c, files in zip(cells, found):
+        if files:
+            # the cell is this render's own: the cached post is left alone
+            c.item = dict(c.item, variants=files)
 
 
 async def _tail(path: Path, job: asyncio.Task):
@@ -730,10 +769,6 @@ def _host(req: Request) -> str:
     return req.headers.get("host") or req.url.hostname or ""
 
 
-def _span(s: float) -> str:
-    return f"{s / 60:g} min" if s >= 60 else f"{s:g}s"
-
-
 def _card(req: Request, title: str, text: str, image: str | None = None, color: str = "#1d9bf0") -> HTMLResponse:
     """A plain link embed: a title, a line of text, and an image if given."""
     e = lambda s: html.escape(str(s), quote=True)
@@ -751,7 +786,7 @@ def _card(req: Request, title: str, text: str, image: str | None = None, color: 
 
 
 def _guide_values(req: Request) -> dict:
-    return {"host": _host(req), "long": f"{LONG_VIDEO:g}", "forced": _span(MAX_FORCED), "posts": profile.POSTS, "top_from": profile.TOP_FROM}
+    return {"host": _host(req), "posts": profile.POSTS, "top_from": profile.TOP_FROM}
 
 
 def _guide(req: Request, page: guide.Page, bot: bool):
@@ -857,8 +892,8 @@ async def post(path: str, req: Request):
         if meta is None or f.plain:
             post_ = await _post(tid, f)
             lead = _lead(post_)
-            if lead and (f.plain or _length(lead, f) > (MAX_FORCED if f.render else LONG_VIDEO)):
-                # too long to render: x.com's own file, or a plain embed of it
+            if lead and (f.plain or _length(lead, f) > MAX_RENDER):
+                # too long to render: the site's own file, or a plain embed of it
                 if f.raw or f.media and discord:
                     return RedirectResponse(lead["url"], status_code=302)
                 return HTMLResponse(_plain(req, tid, post_, f.query()))

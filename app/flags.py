@@ -12,7 +12,7 @@ flag with a value it can't read.
     v            every video, the same values; a numbered flag wins over it
     q            quote depth 0-3 (default 1)
     quote        start from the post it quotes, leaving the top post out; the
-                 other flags, video numbers too, count from there
+    (or inner)   other flags, video numbers too, count from there
     stats        0 drops the reply/repost/like row
     theme        dark, dim, light
     lang         translate the text into this language (es, ja, fr, de, ...)
@@ -20,10 +20,9 @@ flag with a value it can't read.
                  a lone gif is the gif itself, made from x.com's own file
     lines        cut the text after this many lines, with "Show more"
     start, end   clip the lead video: seconds, or m:ss / h:mm:ss
-    plain        a video post goes out as x.com's own file, not the render
-    render       render a video over embed.LONG_VIDEO anyway, up to embed.MAX_FORCED
+    plain        a video post goes out as the site's own file, not the render
     raw          every visitor, a browser too, is sent to the rendered file
-                 (or to x.com's own file, for a video too long to render)
+                 (or to the site's own file, for a video over embed.MAX_RENDER)
     cancel       stop every render of this post that is still running
     top          on a profile: their most liked recent posts, not the latest
     help         the guide (guide.py) instead of the post
@@ -47,7 +46,7 @@ THEMES = ("dark", "dim", "light")
 MAX_VIDEOS = 9
 MAX_LINES = 200
 DEPTH = 1
-NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "lang", "render", "top", "workflows"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
+NAMES = {"v", "q", "stats", "theme", "lines", "start", "end", "plain", "raw", "cancel", "media", "help", "quote", "inner", "lang", "top", "workflows"} | {f"v{n}" for n in range(1, MAX_VIDEOS + 1)}
 _TRUE = {"", "1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
 _ALIAS = {"img": "image", "still": "image", "pic": "image", "photo": "image", "silent": "mute", "audio": "sound", "loud": "sound",
@@ -76,7 +75,6 @@ class Flags:
     end: float | None = None
     videos: tuple[tuple[int, str], ...] = ()   # (n, treatment), n=0 for every video
     plain: bool = False
-    render: bool = False   # how the page is answered, not what is drawn: left out of query()
     raw: bool = False
     cancel: bool = False
     help: bool = False
@@ -147,6 +145,8 @@ def parse(params: Mapping[str, str]) -> Flags:
     vids: dict[int, str] = {}
     for k, v in params.items():
         k = k.lower()
+        if k == "inner":
+            k = "quote"
         if k not in NAMES:
             continue
         v = str(v).strip()
@@ -156,7 +156,7 @@ def parse(params: Mapping[str, str]) -> Flags:
                 vids[0 if k == "v" else int(k[1:])] = t
         elif k == "q" and v.isdigit():
             kw["depth"] = min(3, int(v))
-        elif k in ("stats", "plain", "render", "raw", "cancel", "media", "help", "workflows", "quote", "top") and _bool(v) is not None:
+        elif k in ("stats", "plain", "raw", "cancel", "media", "help", "workflows", "quote", "top") and _bool(v) is not None:
             kw[k] = _bool(v)
         elif k == "theme" and v.lower() in THEMES:
             kw["theme"] = v.lower()

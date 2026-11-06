@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import card, embed, profile, shard, substack
+from app import card, embed, profile, shard, shot, substack
 from app import resolve as rs
 from test_embed_scale import BROWSER, DISCORDBOT, TELEGRAM
 
@@ -212,3 +213,111 @@ def test_note_and_tweet_renders_never_share_a_name():
     assert embed._name("ss_123", f) != embed._name("123", f)
     assert embed._owner_key("ss_123").isdigit() and embed._site("ss_123") == "substack" and embed._site("123") == "x"
     assert embed._pname("su_Writer", f) == "su_writer" and embed._pname("u_Writer", f) == "u_writer"
+
+
+# ----------------------------------------------------------------- videos ---
+
+LONG = {"type": "video", "media_upload_id": "up", "mediaUpload": {"state": "transcoded", "width": 1080, "height": 1920, "duration": 77.2}}
+
+
+@pytest.fixture
+def long_note(monkeypatch):
+    async def fetch(cid, depth):
+        return substack._normalize(raw(int(cid), attachments=[dict(LONG)]))
+    monkeypatch.setattr(substack, "fetch", fetch)
+    started = []
+    monkeypatch.setattr(embed, "render", lambda tid, f: started.append(tid))
+    return started
+
+
+def test_a_long_note_video_is_rendered_by_default(long_note):
+    r = client().get("/@writer/note/c-5", headers={"User-Agent": DISCORDBOT}, follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == f"https://{HOST}/m/ss_5.mp4"
+    assert long_note == ["ss_5"]
+
+
+def test_plain_or_past_max_render_is_substacks_own_file(long_note, monkeypatch):
+    r = client().get("/@writer/note/c-5?plain", headers={"User-Agent": TELEGRAM})
+    assert f'og:video" content="{substack.VIDEO.format(id="up")}"' in r.text
+    monkeypatch.setattr(embed, "MAX_RENDER", 60)
+    r = client().get("/@writer/note/c-5", headers={"User-Agent": TELEGRAM})
+    assert 'og:video" content="https://substack.com/api/v1/video' in r.text and long_note == []
+
+
+class Reply:
+    def __init__(self, status: int, location: str = ""):
+        self.status_code, self.headers = status, {"location": location} if location else {}
+        self.is_redirect = status in (301, 302, 307, 308)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+HIGH = "https://stream.mux.com/Ab12/high.mp4?token=t.k.n"
+
+
+def video_item() -> dict:
+    return substack._normalize(raw(1, attachments=[dict(LONG)]))["media"][0]
+
+
+def test_files_behind_a_note_video(monkeypatch):
+    asked = []
+
+    async def get(url, follow_redirects=True):
+        asked.append(url)
+        return Reply(302, HIGH)
+    monkeypatch.setattr(substack.client(), "get", get)
+    monkeypatch.setattr(substack.tunnel.client(), "stream", lambda m, url, headers: (asked.append(url), Reply(206))[1])
+    monkeypatch.setattr(rs, "assert_public", lambda url: None)
+    got = asyncio.run(substack.files(video_item()))
+    assert got == [{"url": "https://stream.mux.com/Ab12/medium.mp4?token=t.k.n", "w": 480, "h": 854},
+                   {"url": HIGH, "w": 1080, "h": 1920}]
+    assert asked == [substack.VIDEO.format(id="up"), got[0]["url"]]
+    # no medium.mp4 for this asset: high alone
+    monkeypatch.setattr(substack.tunnel.client(), "stream", lambda m, url, headers: Reply(404))
+    assert asyncio.run(substack.files(video_item())) == [{"url": HIGH, "w": 1080, "h": 1920}]
+
+
+def test_files_when_the_src_is_not_mux(monkeypatch):
+    async def get(url, follow_redirects=True):
+        return Reply(302, "https://elsewhere.example/v.mp4")
+    monkeypatch.setattr(substack.client(), "get", get)
+    assert asyncio.run(substack.files(video_item())) == []
+
+
+def test_the_smallest_file_that_fills_the_cell_is_read():
+    item = dict(video_item(), variants=[{"url": "m", "w": 480, "h": 854}, {"url": "h", "w": 1080, "h": 1920}])
+    assert shot.source(item, 466, 830, "contain") == "m"      # a 1x cell
+    assert shot.source(item, 1036, 1658, "contain") == "h"    # a 2x cell
+    assert shot.source(item, 2000, 4000, "contain") == "h"    # bigger than any: the largest
+    assert shot.source(video_item(), 466, 830, "contain") == substack.VIDEO.format(id="up")
+
+
+def test_a_long_video_is_drawn_smaller():
+    L = card.layout(substack._normalize(raw(1, attachments=[dict(LONG)])))
+    assert embed._scale(L, 10) == 1.0 and embed._scale(L, 0) == 1.0
+    assert embed._scale(L, 77) == embed.MIN_SCALE
+    k = embed._scale(L, 30)
+    assert embed.MIN_SCALE < k < 1
+    small = shot.scaled(L, k)
+    assert small.width % 2 == small.height % 2 == 0
+    c, s = L.cells[0], small.cells[0]
+    # the cell still covers the hole drawn at this size
+    assert s.x <= c.x * k and s.y <= c.y * k and s.x + s.w >= (c.x + c.w) * k and s.y + s.h >= (c.y + c.h) * k
+    assert s.w % 2 == s.h % 2 == 0 and s.item is c.item
+    png = card.render(L, True, (small.width, small.height))
+    from PIL import Image
+    import io
+    assert Image.open(io.BytesIO(png)).size == (small.width, small.height)
+
+
+def test_a_note_video_has_its_still_for_a_poster():
+    up = dict(LONG["mediaUpload"], user_id=11, thumbnail_id=3)
+    item = substack._normalize(raw(1, attachments=[dict(LONG, mediaUpload=up)]))["media"][0]
+    still = "https://substack-video.s3.amazonaws.com/video_upload/user/11/up/transcoded-00003.png"
+    assert item["poster"].startswith("https://substackcdn.com/image/fetch/w_1200,") and item["poster"].endswith(quote(still, safe=""))
+    # no thumbnail named: no poster, drawn black as before
+    assert video_item()["poster"] is None

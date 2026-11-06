@@ -605,8 +605,56 @@ def _line(s: str, bold: bool, size: float, color: str, maxw: float) -> tuple[Tex
     return t, w
 
 
+GRID_MAX = 1.25            # a grid of several is at most this tall for its width
+ASPECT = (1 / 3, 3)        # a stranger shape than this is letterboxed in its cell
+
+
+def _groups(n: int) -> list[list[list[int]]]:
+    """Every way to cut 0..n-1 into runs that keep their order."""
+    out = []
+    for mask in range(1 << (n - 1)):
+        runs, run = [], [0]
+        for i in range(1, n):
+            if mask >> (i - 1) & 1:
+                runs.append(run)
+                run = []
+            run.append(i)
+        out.append(runs + [run])
+    return out
+
+
+def _rows(a: list[float], runs: list[list[int]], w: float, gap: float) -> tuple[list[tuple], float]:
+    boxes, y = [], 0.0
+    for run in runs:
+        h = (w - gap * (len(run) - 1)) / sum(a[i] for i in run)
+        x = 0.0
+        for i in run:
+            boxes.append((i, x, y, a[i] * h, h))
+            x += a[i] * h + gap
+        y += h + gap
+    return boxes, y - gap
+
+
+def _cols(a: list[float], runs: list[list[int]], w: float, gap: float) -> tuple[list[tuple], float]:
+    # every column is the same height H, so each width is (H - its gaps) / sum(h/w)
+    r = [sum(1 / a[i] for i in run) for run in runs]
+    H = (w - gap * (len(runs) - 1) + sum(gap * (len(run) - 1) / rc for run, rc in zip(runs, r))) / sum(1 / rc for rc in r)
+    boxes, x = [], 0.0
+    for run, rc in zip(runs, r):
+        cw = (H - gap * (len(run) - 1)) / rc
+        y = 0.0
+        for i in run:
+            boxes.append((i, x, y, cw, cw / a[i]))
+            y += cw / a[i] + gap
+        x += cw + gap
+    return boxes, H
+
+
 def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple) -> tuple[list[tuple], float]:
-    """Where each media item goes, in css px, and the block's height."""
+    """Where each media item goes, in css px, and the block's height. Several
+    are each shown whole: of every arrangement in rows or in columns that keeps
+    their order, the one whose smallest item is largest, shrunk to centre if it
+    would stand taller than GRID_MAX."""
     n = len(items)
     gap = 2
     if n == 1:
@@ -617,16 +665,22 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
             return [(it, x, y, w, h, "cover")], h
         h = min(w * ih / iw, w * 1.6)
         return [(it, x, y, w, h, "contain")], h
-    hw = (w - gap) / 2
-    if n == 2:
-        h = hw * 8 / 7
-        return [(items[0], x, y, hw, h, "cover"), (items[1], x + hw + gap, y, hw, h, "cover")], h
-    h = w * 9 / 16
-    hh = (h - gap) / 2
-    if n == 3:
-        return [(items[0], x, y, hw, h, "cover"), (items[1], x + hw + gap, y, hw, hh, "cover"), (items[2], x + hw + gap, y + hh + gap, hw, hh, "cover")], h
-    return [(items[0], x, y, hw, hh, "cover"), (items[1], x + hw + gap, y, hw, hh, "cover"),
-            (items[2], x, y + hh + gap, hw, hh, "cover"), (items[3], x + hw + gap, y + hh + gap, hw, hh, "cover")], h
+    raw = [(it.get("w") or 16) / (it.get("h") or 9) for it in items]
+    a = [min(max(v, ASPECT[0]), ASPECT[1]) for v in raw]
+    best, best_score = None, -1.0
+    for runs in _groups(n):
+        for arrange in (_rows, _cols):
+            boxes, h = arrange(a, runs, w, gap)
+            k = min(1.0, w * GRID_MAX / h)
+            # the smallest item, as large as it can be, less the width left empty
+            score = min(bw * bh for _, _, _, bw, bh in boxes) * k * k * k
+            if score > best_score + 1e-6:
+                best, best_score = (boxes, h, k), score
+    boxes, h, k = best
+    left = x + w * (1 - k) / 2
+    out = [(items[i], left + bx * k, y + by * k, bw * k, bh * k, "cover" if a[i] == raw[i] else "contain")
+           for i, bx, by, bw, bh in boxes]
+    return out, h * k
 
 
 def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES,
@@ -643,16 +697,20 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     def media_block(items, x, y, w, corners, in_quote, bare=False):
         boxes, h = media_boxes(items, x, y, w, corners)
         radius = 0 if bare else 16
+        # a grid shrunk to fit is narrower than the column, and framed as drawn
+        x0 = min(b[1] for b in boxes)
+        w = max(b[1] + b[3] for b in boxes) - x0
+        x = x0
         for it, bx, by, bw, bh, fit in boxes:
             single = len(boxes) == 1
             if single:
                 cr = corners
             else:
                 # per-cell rounding: only the outer corners of the grid
-                cr = (bx == x and by == y and corners[0], bx + bw >= x + w - 0.5 and by == y and corners[1],
-                      bx + bw >= x + w - 0.5 and by + bh >= y + h - 0.5 and corners[2], bx == x and by + bh >= y + h - 0.5 and corners[3])
+                top, bottom, l, r = by <= y + 0.5, by + bh >= y + h - 0.5, bx <= x + 0.5, bx + bw >= x + w - 0.5
+                cr = (l and top and corners[0], r and top and corners[1], r and bottom and corners[2], l and bottom and corners[3])
             if it["kind"] == "photo":
-                ops.append(("image", it["url"], px(bx), px(by), px(bw), px(bh), px(radius), cr, "cover"))
+                ops.append(("image", it["url"], px(bx), px(by), px(bw), px(bh), px(radius), cr, fit))
             else:
                 # a still is its poster alone, with no cell for ffmpeg to fill
                 if not it.get("still"):
@@ -859,10 +917,15 @@ def _fit(im: Image.Image, w: int, h: int, fit: str, bg) -> Image.Image:
     return out
 
 
-def render(L: Layout, holes: bool = True) -> bytes:
-    """Draw the layout as a png; with `holes`, every video cell is left transparent."""
+def render(L: Layout, holes: bool = True, size: tuple[int, int] | None = None) -> bytes:
+    """Draw the layout as a png; with `holes`, every video cell is left
+    transparent. With `size` it is drawn at full size and scaled down, so the
+    text keeps its shapes."""
+    im = draw(L, holes)
+    if size and size != im.size:
+        im = im.resize(size, Image.LANCZOS)
     out = io.BytesIO()
-    draw(L, holes).save(out, "PNG", optimize=False, compress_level=6)
+    im.save(out, "PNG", optimize=False, compress_level=6)
     return out.getvalue()
 
 

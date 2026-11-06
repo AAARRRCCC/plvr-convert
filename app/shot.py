@@ -6,6 +6,7 @@ without one it is a png.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import math
 import os
@@ -23,6 +24,8 @@ log = logging.getLogger("convert.shot")
 
 MAX_DURATION = 600   # x.com's own cap is ten minutes for most accounts
 GIF_LOOP = 10        # seconds a leading gif is looped to: a chat app plays the video once
+FPS = 30
+SLACK = 1.1          # how far a video's file may be stretched before a bigger one is read
 FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 
 
@@ -104,6 +107,33 @@ def _probe(item: dict) -> float:
         return 0.0
 
 
+def scaled(L: card.Layout, k: float) -> card.Layout:
+    """The canvas and its video cells at k of their size, for an mp4 drawn
+    smaller than the png. Geometry only: the card is drawn from the full
+    layout with card.render's size. Each cell grows to whole even pixels, so
+    the card on top still covers its edges."""
+    if k >= 1:
+        return L
+    cells = []
+    for c in L.cells:
+        x, y = int(c.x * k), int(c.y * k)
+        w, h = math.ceil((c.x + c.w) * k) - x, math.ceil((c.y + c.h) * k) - y
+        cells.append(dataclasses.replace(c, x=x, y=y, w=w + w % 2, h=h + h % 2, radius=round(c.radius * k)))
+    return card.Layout(round(L.width * k / 2) * 2, round(L.height * k / 2) * 2, L.theme, [], cells)
+
+
+def source(item: dict, w: int, h: int, fit: str) -> str:
+    """Which of a video's files to read for a cell w x h: the smallest
+    stretched no more than SLACK to fill it, else the largest. On a small
+    canvas, decoding a file bigger than its cell is most of the cost."""
+    files = [v for v in item.get("variants") or [] if v.get("w") and v.get("h")]
+    if not files:
+        return item["url"]
+    fill = min if fit == "contain" else max
+    fits = [v for v in files if fill(w / v["w"], h / v["h"]) <= SLACK]
+    return (min(fits, key=lambda v: v["w"] * v["h"]) if fits else max(files, key=lambda v: v["w"] * v["h"]))["url"]
+
+
 def _fmt(item: dict) -> Fmt:
     return Fmt(id="shot", url=item["url"], ext="mp4", protocol="https", kind="progressive", vcodec="h264", acodec="aac",
                height=item.get("h") or 0, width=item.get("w") or 0, fps=0, tbr=0, abr=0, size=0, hdr=False, lang_pref=0, lang=None)
@@ -112,7 +142,7 @@ def _fmt(item: dict) -> Fmt:
 def _graph(L: card.Layout) -> tuple[list[str], str, int]:
     """The ffmpeg filter graph: each video scaled into its cell over a black
     canvas, the card on top. Returns (filter parts, output label, master index)."""
-    parts = [f"color=c=black:s={L.width}x{L.height}:r=30[bg]"]
+    parts = [f"color=c=black:s={L.width}x{L.height}:r={FPS}[bg]"]
     prev = "bg"
     master_idx = 1
     for i, c in enumerate(L.cells):
@@ -122,7 +152,7 @@ def _graph(L: card.Layout) -> tuple[list[str], str, int]:
             sc = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
         else:
             sc = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
-        parts.append(f"[{n}:v]{sc},setsar=1,fps=30[v{n}]")
+        parts.append(f"[{n}:v]{sc},setsar=1,fps={FPS}[v{n}]")
         # the lead video's end is the render's end; any other stops where it is
         parts.append(f"[{prev}][v{n}]overlay={c.x}:{c.y}:eof_action={'endall' if c.master else 'pass'}[b{n}]")
         prev = f"b{n}"
@@ -138,8 +168,8 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
     L, p = shot.layout, shot.plan
     argv = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "png_pipe", "-i", "pipe:0"]
     for c in L.cells:
-        assert_public(c.item["url"])
-        f = _fmt(c.item)
+        f = _fmt(dict(c.item, url=source(c.item, c.w, c.h, c.fit)))
+        assert_public(f.url)
         if not c.master:
             argv += ["-stream_loop", "-1"]
         else:
@@ -153,7 +183,7 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
     argv += ["-filter_complex", ";".join(parts), "-map", f"[{out}]"]
     if not any(c.master and c.item.get("mute") for c in L.cells):
         argv += ["-map", f"{master}:a?"]
-    argv += ["-c:v", "libx264", "-preset", preset, "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", "30",
+    argv += ["-c:v", "libx264", "-preset", preset, "-crf", "21", "-profile:v", "high", "-level", "5.1", "-r", str(FPS),
              "-c:a", "aac", "-b:a", "160k", "-shortest"]
     if dur:
         argv += ["-t", f"{dur:.3f}"]

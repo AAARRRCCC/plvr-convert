@@ -27,6 +27,14 @@ own preview. Discord is redirected to the mp4 at once and streamed it while
 it renders, so it plays like an upload; other link-preview fetchers get Open
 Graph tags; a browser goes on to x.com. Run it with `uvicorn app.embed:app`.
 
+Every video is rendered, up to `MAX_RENDER` (10 min). Discord gives up about
+10s into reading a video, so a longer one is drawn on a smaller canvas, from
+the png's 2x down to 1x, until it fits `RENDER_BUDGET`, and each video is
+read from the smallest of its files that fills its cell (Mux's `medium.mp4`
+for a Substack upload). Each render logs its megapixel-frames per second, to
+tune the budget by. A render that still runs past Discord's wait is cut short
+in the preview.
+
 Substack notes work the same way (`app/substack.py`): swap `substack.com` for
 the embed domain in `/@<user>/note/c-<id>`, or `/@<user>` for the profile with
 their latest notes. The flags apply as on x.com, except `lang`.
@@ -49,10 +57,10 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 | `stats` | `0` | no reply/repost/like row |
 | `theme` | `dark`, `dim`, `light` | |
 | `lines` | a number | cut the text there, with "Show more" |
-| `media` | | the media alone, stacked edge to edge: no name, text or stats (a long video goes to Discord as x.com's file; a lone gif comes out as the gif itself, which Discord shows alone under the link) |
-| `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a clip under `LONG_VIDEO` renders even from a long one |
-| `plain` | | a video post goes out as x.com's own file |
-| `raw` | | anyone, a browser too, is sent to the rendered file (x.com's own file for a video too long to render) |
+| `media` | | the media alone, stacked edge to edge: no name, text or stats (a video over `MAX_RENDER` goes to Discord as the site's own file; a lone gif comes out as the gif itself, which Discord shows alone under the link) |
+| `start`, `end` | `90`, `1:30`, `1m30s` | clip the lead video; a shorter clip renders faster and at a larger size |
+| `plain` | | a video post goes out as the site's own file |
+| `raw` | | anyone, a browser too, is sent to the rendered file (the site's own file for a video over `MAX_RENDER`) |
 | `cancel` | | stops every running render of the post, ffmpeg included |
 | `top` | | on a profile: the most liked of their last 60 timeline entries, not the latest |
 | `help` | | the guide instead of the post (`/help` too) |
@@ -60,7 +68,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
-`EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `LONG_VIDEO`, `X264_PRESET`,
+`EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `MAX_RENDER`, `RENDER_BUDGET`, `X264_PRESET`,
 `TARGET_MB`, `PROFILE_TTL`, `PROFILE_POSTS`.
 
 ## Run it

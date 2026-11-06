@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -20,6 +21,7 @@ from urllib.parse import quote
 import httpx
 
 from . import resolve as rs
+from . import tunnel
 from .tweet import UA
 
 log = logging.getLogger("convert.substack")
@@ -29,7 +31,13 @@ NOTE = "https://substack.com/api/v1/reader/comment/{id}"
 PROFILE = "https://substack.com/api/v1/user/{handle}/public_profile"
 FEED = "https://substack.com/api/v1/reader/feed/profile/{uid}"
 VIDEO = "https://substack.com/api/v1/video/upload/{id}/src"   # answers with a redirect to the signed mp4
+# where that redirect goes: Mux's high.mp4, with medium.mp4 beside it at MEDIUM
+# on its short side, signed by the same token
+MUX = re.compile(r"(https://stream\.mux\.com/[A-Za-z0-9]+/)high\.mp4(\?[^\s]*)?")
+MEDIUM = 480
 UPLOADS = "https://substack-post-media.s3.amazonaws.com/"
+# an uploaded video's stills, numbered from 1; mediaUpload.thumbnail_id is its poster
+STILL = "https://substack-video.s3.amazonaws.com/video_upload/user/{user}/{id}/transcoded-{n:05d}.png"
 CDN = "https://substackcdn.com/image/fetch/w_{w},c_limit,f_jpg,q_auto:good/{url}"
 MAX_DEPTH = 3
 _BLOCKS = {"paragraph", "heading", "blockquote", "bullet_list", "ordered_list", "list_item", "code_block", "horizontal_rule"}
@@ -42,8 +50,8 @@ def note_url(handle: str, cid: str | int) -> str:
 def _img(url: str | None, width: int) -> str | None:
     """An uploaded image through Substack's own CDN, as a jpeg no wider than
     `width`: the original is often an iPhone's HEIC, which can't be drawn,
-    and several thousand pixels across."""
-    if url and url.startswith(UPLOADS):
+    and several thousand pixels across. A video's still is a png that size."""
+    if url and url.startswith((UPLOADS, STILL.split("{")[0])):
         return CDN.format(w=width, url=quote(url, safe=""))
     return url
 
@@ -118,6 +126,38 @@ async def fetch(cid: str, depth: int) -> dict:
     log.info("note %s depth %d %.1fs", cid, depth, time.time() - t0)
     rs._put(key, post)
     return post
+
+
+async def files(item: dict) -> list[dict]:
+    """The files an uploaded video can be read from, [{url, w, h}], for a
+    render to take the smallest that fills its cell: the src redirects to
+    Mux's high.mp4, and medium.mp4 is the same video at 480p. [] when that
+    can't be told, and the src is read as it is."""
+    w, h = item.get("w") or 0, item.get("h") or 0
+    try:
+        r = await client().get(item["url"], follow_redirects=False)
+    except httpx.HTTPError:
+        return []
+    m = MUX.fullmatch(r.headers.get("location", "")) if r.is_redirect else None
+    if not m or not w or not h:
+        return []
+    high = [{"url": m.group(0), "w": w, "h": h}]
+    k = MEDIUM / min(w, h)
+    if k >= 1:
+        return high
+    medium = f"{m.group(1)}medium.mp4{m.group(2) or ''}"
+    # an asset has medium.mp4 only when it was made with one: look before
+    # ffmpeg is pointed at it
+    try:
+        rs.assert_public(medium)
+        # streamed and never read, should the Range be ignored
+        async with tunnel.client().stream("GET", medium, headers={"User-Agent": UA, "Range": "bytes=0-0"}) as got:
+            there = got.status_code in (200, 206)
+    except (httpx.HTTPError, rs.ResolveError):
+        return high
+    if not there:
+        return high
+    return [{"url": medium, "w": round(w * k / 2) * 2, "h": round(h * k / 2) * 2}] + high
 
 
 _reading: dict[str, asyncio.Task] = {}   # timelines being read, so a page and its render share one read
@@ -242,7 +282,10 @@ def _media(raw: dict) -> list[dict]:
             up = a.get("mediaUpload") or {}
             if up.get("state") not in (None, "transcoded"):
                 continue
-            out.append({"kind": "video", "url": VIDEO.format(id=a["media_upload_id"]), "poster": None,
+            poster = None
+            if up.get("user_id") and up.get("thumbnail_id"):
+                poster = _img(STILL.format(user=up["user_id"], id=a["media_upload_id"], n=int(up["thumbnail_id"])), 1200)
+            out.append({"kind": "video", "url": VIDEO.format(id=a["media_upload_id"]), "poster": poster,
                         "w": int(up.get("width") or 0), "h": int(up.get("height") or 0), "duration": float(up.get("duration") or 0)})
     return out[:4]
 

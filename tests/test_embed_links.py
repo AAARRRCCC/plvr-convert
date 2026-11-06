@@ -73,6 +73,9 @@ def test_guide_images_and_font():
 
 def test_every_flag_is_in_the_help():
     words = {w for i in guide.HELP.items for w in re.findall(r"[a-z]+\d*", i.chip)}
+    # the help names quote by its other name, inner
+    if "inner" in words:
+        words.add("quote")
     assert {n for n in flags.NAMES if not re.fullmatch(r"v\d", n)} <= words
 
 
