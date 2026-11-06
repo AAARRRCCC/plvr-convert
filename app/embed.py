@@ -40,13 +40,16 @@ image of the profile: its header and several of the user's own posts
 (profile.py), or with top their most liked. /help and /workflows are the
 guide (guide.py): an image for a chat app, a page for a browser.
 
-A Substack note works the same with substack.com swapped for this host:
+A Substack note works the same on substack.<this host>, with that put in
+place of substack.com:
 
-    https://<this host>/@<user>/note/c-<id>
+    https://substack.<this host>/@<user>/note/c-<id>
 
-and https://<this host>/@<user> is that user's profile, with their notes for
-posts (substack.py). Their renders are named ss_<id> and su_<user>, apart
-from x.com's, and a browser is sent on to substack.com.
+and https://substack.<this host>/@<user> is that user's profile, with their
+notes for posts (substack.py). There every path is substack.com's, so a
+browser is sent on to substack.com whatever it asked for. The same paths on
+this host itself, the form links took before, still work. Their renders are
+named ss_<id> and su_<user>, apart from x.com's.
 
 Renders are kept on disk for RENDER_TTL, a profile's for PROFILE_TTL. A gif
 is kept in GIF_DIR until GIF_MAX_MB pushes out the one served longest ago: a
@@ -643,10 +646,16 @@ def _plain(req: Request, tid: str, post: dict, q: str = "") -> str:
 </head><body></body></html>"""
 
 
+def _on_substack(req: Request) -> bool:
+    """Whether the link was taken from substack.com: it came to substack.<this host>."""
+    return _host(req).lower().startswith("substack.")
+
+
 def _onward(req: Request) -> RedirectResponse:
-    """The same link on the site it was taken from: substack.com for a note
-    or an @ profile, else x.com."""
-    site = "substack.com" if NOTE.match(req.url.path) or SUSER.match(req.url.path) else "x.com"
+    """The same link on the site it was taken from: substack.com for
+    anything on substack.<this host>, or a note or an @ profile here; else
+    x.com."""
+    site = "substack.com" if _on_substack(req) or NOTE.match(req.url.path) or SUSER.match(req.url.path) else "x.com"
     return RedirectResponse(f"https://{site}{req.url.path}{flags.strip(req.query_params)}", status_code=302)
 
 
@@ -786,7 +795,9 @@ def _card(req: Request, title: str, text: str, image: str | None = None, color: 
 
 
 def _guide_values(req: Request) -> dict:
-    return {"host": _host(req), "posts": profile.POSTS, "top_from": profile.TOP_FROM}
+    # the guide's links are x.com's, on this host itself
+    host = _host(req)
+    return {"host": host[len("substack."):] if _on_substack(req) else host, "posts": profile.POSTS, "top_from": profile.TOP_FROM}
 
 
 def _guide(req: Request, page: guide.Page, bot: bool):
@@ -854,10 +865,12 @@ async def me(req: Request):
 async def post(path: str, req: Request):
     ua = req.headers.get("user-agent", "")
     path = req.url.path
-    # the post's render id (a tweet's id, or ss_<id> for a note) or the profile's
-    m, note = STATUS.match(path), NOTE.match(path)
+    # the post's render id (a tweet's id, or ss_<id> for a note) or the
+    # profile's; on substack.<this host> only Substack's paths are anything
+    x = not _on_substack(req)
+    m, note = x and STATUS.match(path), NOTE.match(path)
     tid = m.group(1) if m else f"ss_{note.group(1)}" if note else None
-    u, su = USER.match(path), SUSER.match(path)
+    u, su = x and USER.match(path), SUSER.match(path)
     pid = f"u_{u.group(1)}" if u and u.group(1).lower() not in RESERVED else f"su_{su.group(1)}" if su else None
     discord = bool(DISCORD.search(ua))
     f = flags.parse(req.query_params)

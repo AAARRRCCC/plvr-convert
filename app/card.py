@@ -1,8 +1,8 @@
 """Draw a post the way x.com shows it in a timeline: a 598px column at 2x,
 name and handle, the text with its links in blue, the media grid, the quoted
 post as a card, and the action row with its counts. A Substack note (site
-"substack") is drawn the same way, in Substack's orange and with its own
-action row, and the article or link it carries as a preview card.
+"substack") is laid out by notecard.py, as substack.com shows it, and drawn
+here.
 
 `layout` measures everything from the post's metadata and returns the size
 plus where each video goes; `render` draws it, fetching the images. A video
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from . import tweet
 from .resolve import MAX_REDIRECTS, assert_public, public_transport_sync
@@ -59,6 +59,10 @@ class Fonts:
     ROLES = {
         "regular": ["Inter-Regular.otf", "Inter-Regular.ttf", "Inter.ttc", "segoeui.ttf", "DejaVuSans.ttf"],
         "bold": ["Inter-Bold.otf", "Inter-Bold.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"],
+        # Substack's weights between the two, and its serif for a quoted passage
+        "medium": ["Inter-Medium.otf", "Inter-Medium.ttf", "seguisb.ttf", "Inter-SemiBold.otf", "Inter-Bold.otf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"],
+        "semibold": ["Inter-SemiBold.otf", "Inter-SemiBold.ttf", "seguisb.ttf", "Inter-Bold.otf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"],
+        "serif": ["NotoSerif-Regular.ttf", "georgia.ttf", "DejaVuSerif.ttf"],
         "cjk": ["NotoSansCJK-Regular.ttc", "NotoSansCJKjp-Regular.otf", "NotoSansJP-Regular.otf", "YuGothR.ttc", "msgothic.ttc", "NotoSansSC-VF.ttf"],
         "cjk-bold": ["NotoSansCJK-Bold.ttc", "NotoSansCJKjp-Bold.otf", "NotoSansJP-Bold.otf", "YuGothB.ttc", "msgothic.ttc", "NotoSansSC-VF.ttf"],
         "other": ["NotoSans-Regular.ttf", "NotoSans[wdth,wght].ttf", "segoeui.ttf", "DejaVuSans.ttf"],
@@ -100,11 +104,14 @@ class Fonts:
                 self.cmaps[p] = set()
         return self.cmaps[p]
 
-    def role_for(self, ch: str, bold: bool) -> str:
+    def role_for(self, ch: str, bold: bool | str) -> str:
+        """The face a character is drawn in; `bold` is True, False or the
+        face wanted (medium, semibold, serif), the others its fallbacks."""
         cp = ord(ch)
-        base = "bold" if bold else "regular"
+        base = face(bold)
         if cp < 0x2000 or cp in self.cmap(base):
             return base
+        bold = base in ("bold", "medium", "semibold")
         for r in (("cjk-bold", "cjk") if bold else ("cjk",)) if _is_cjk(cp) else ():
             if cp in self.cmap(r):
                 return r
@@ -126,7 +133,7 @@ class Fonts:
                     f = ImageFont.truetype(p, int(round(px))) if p else ImageFont.load_default(size=int(round(px)))
                     if p and "VF" in os.path.basename(p) or (p and "[" in os.path.basename(p)):
                         try:
-                            f.set_variation_by_axes([700 if "bold" in role else 400])
+                            f.set_variation_by_axes([WEIGHTS.get(role, 700 if "bold" in role else 400)])
                         except Exception:
                             pass
                 except OSError:
@@ -136,6 +143,12 @@ class Fonts:
 
 
 _fonts: Fonts | None = None
+WEIGHTS = {"medium": 500, "semibold": 600}
+
+
+def face(bold: bool | str) -> str:
+    """The face a Text is set in: bold or regular, or one named."""
+    return bold if isinstance(bold, str) else "bold" if bold else "regular"
 
 
 def fonts() -> Fonts:
@@ -261,7 +274,7 @@ def prefetch(layouts: list[Layout]) -> None:
     urls = set()
     for L in layouts:
         for op in L.ops:
-            if op[0] in ("avatar", "image", "poster") and op[1]:
+            if op[0] in ("avatar", "image", "poster", "postcard") and op[1]:
                 urls.add(op[1])
             elif op[0] == "lines":
                 urls |= {TWEMOJI.format(code=twemoji_code(a["s"])) for line in op[1].lines for a in line if a["kind"] == "emoji"}
@@ -437,18 +450,55 @@ ICONS = {
 }
 
 
-# Substack's action row, drawn as outlines 2 wide in the same 24 box (Lucide's
-# heart, message-circle, repeat-2 and share, ISC licensed)
+# Substack's glyphs, drawn as outlines: (path, its box, stroke width in that
+# box). The action row is Substack's own, 1.5 wide in a 20 box; the rest are
+# Lucide's (ISC licensed), as Substack uses them.
 STROKES = {
-    "s_like": "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z",
-    "s_reply": "M7.9 20A9 9 0 1 0 4 16.1L2 22Z",
-    "s_restack": "m2 9 3-3 3 3M13 18H7a2 2 0 0 1-2-2V6m20 9-3 3-3-3M11 6h6a2 2 0 0 1 2 2v10",
-    "s_share": "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8m-4-6-4-4-4 4M12 2v13",
+    "s_like": ("M5.00002 2.54822C8.00003 2.09722 9.58337 4.93428 10 5.87387C10.4167 4.93428 12 2.09722 15 2.54822C18 2.99923 18.75 5.66154 "
+               "18.75 7.05826C18.75 9.28572 18.1249 10.9821 16.2499 13.244C14.3749 15.506 10 18.3333 10 18.3333C10 18.3333 5.62498 15.506 "
+               "3.74999 13.244C1.875 10.9821 1.25 9.28572 1.25 7.05826C1.25 5.66154 2 2.99923 5.00002 2.54822Z", 20, 1.5),
+    "s_reply": ("M18.7502 11V7.50097C18.7502 4.73917 16.5131 2.50033 13.7513 2.50042L6.25021 2.50044C3.48848 2.5004 1.25017 4.73875 "
+                "1.2502 7.50048L1.25021 10.9971C1.2502 13.749 3.47395 15.9836 6.22586 15.9971L6.82888 16V19.0182L12.1067 16H13.7502C16.5116 "
+                "16 18.7502 13.7614 18.7502 11Z", 20, 1.5),
+    "s_restack": ("M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647"
+                  "M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 "
+                  "17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 "
+                  "13.0882", 20, 1.5),
+    "s_share": ("M10.2171 2.2793L10.2171 12.9745M10.2171 2.2793L13.333 4.99984M10.2171 2.2793L7.08301 4.99984M2.49967 10.9925L2.49967 "
+                "14.1592C2.49967 16.011 4.00084 17.5121 5.85261 17.5121L14.9801 17.5121C16.8318 17.5121 18.333 16.011 18.333 14.1592L18.333 "
+                "10.9925", 20, 1.5),
+    "s_save": ("m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z", 24, 2),
+    "s_more": ("M4 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0M11 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0M18 12a1 1 0 1 0 2 0a1 1 0 1 0-2 0", 24, 2),
+    "s_next": ("m9 18 6-6-6-6", 24, 2),
+}
+# filled glyphs drawn in a box other than ICONS' 24, top-aligned in it as
+# Substack draws them: the opening quote mark over a quoted passage
+SHAPES = {
+    "s_quote": ("M11.7188 10.6172C11.7188 7.5 9.41016 5.01562 6.43359 5.01562C5.03906 5.01562 3.71484 5.56641 2.74219 6.64453H2.42578C3.10547 "
+                "4.42969 5.16797 2.57812 7.73438 1.81641C8.09766 1.69922 8.36719 1.59375 8.53125 1.45312C8.71875 1.30078 8.82422 1.11328 "
+                "8.82422 0.84375C8.82422 0.351562 8.44922 0.0117188 7.89844 0.0117188C7.53516 0.0117188 7.25391 0.0820312 6.75 0.246094C5.13281 "
+                "0.773438 3.67969 1.69922 2.55469 2.88281C0.972656 4.52344 0 6.71484 0 9.31641C0 13.7109 2.78906 16.2539 6.05859 16.2539C9.28125 "
+                "16.2539 11.7188 13.793 11.7188 10.6172ZM25.793 10.6172C25.793 7.5 23.4727 5.01562 20.5078 5.01562C19.1133 5.01562 17.7773 "
+                "5.56641 16.8164 6.64453H16.5C17.1797 4.42969 19.2422 2.57812 21.7969 1.81641C22.1602 1.69922 22.4414 1.59375 22.6055 "
+                "1.45312C22.793 1.30078 22.8867 1.11328 22.8867 0.84375C22.8867 0.351562 22.5234 0.0117188 21.9727 0.0117188C21.5977 0.0117188 "
+                "21.3281 0.0820312 20.8125 0.246094C19.207 0.773438 17.7422 1.69922 16.6172 2.88281C15.0469 4.52344 14.0742 6.71484 14.0742 "
+                "9.31641C14.0742 13.7109 16.8633 16.2539 20.1328 16.2539C23.3555 16.2539 25.793 13.793 25.793 10.6172Z", 27),
+}
+# substack.com's own colours: "card" is a quoted note, "media" what shows
+# behind an image, "more" the menu dots
+SUBSTACK = {
+    "dark": {"bg": "#161718", "text": "#eeeeee", "gray": "#777777", "line": "#2d2e2f", "blue": ACCENTS["substack"], "ph": "#232525",
+             "card": "#1b1c1d", "media": "#232525", "more": "#5a5b5b"},
+    "light": {"bg": "#ffffff", "text": "#363737", "gray": "#777777", "line": "#e6e6e6", "blue": ACCENTS["substack"], "ph": "#f2f2f2",
+              "card": "#ffffff", "media": "#f2f2f2", "more": "#b4b4b4"},
 }
 
 
 def palette(theme: str, site: str | None = None) -> dict:
-    """A theme's colours, with the site's accent in place of x.com's blue."""
+    """A theme's colours, with the site's accent in place of x.com's blue.
+    Substack has its own light and dark, and draws dim as dark."""
+    if site == "substack":
+        return SUBSTACK["light" if theme == "light" else "dark"]
     T = THEMES.get(theme, THEMES["dark"])
     return dict(T, blue=ACCENTS[site]) if site in ACCENTS else T
 
@@ -460,12 +510,20 @@ def icon(kind: str, px: int, color: str) -> Image.Image:
     d = ImageDraw.Draw(im)
     k = px * ss / 24
     if kind in STROKES:
-        w = round(2 * k)
-        for poly in path_polylines(STROKES[kind]):
+        path, box, width = STROKES[kind]
+        k = px * ss / box
+        w = round(width * k)
+        for poly in path_polylines(path):
             pts = [(x * k, y * k) for x, y in poly]
             d.line(pts, fill=color, width=w, joint="curve")
             for x, y in (pts[0], pts[-1]):
                 d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=color)
+        return im.resize((px, px), Image.LANCZOS)
+    if kind in SHAPES:
+        path, box = SHAPES[kind]
+        k = px * ss / box
+        for poly in path_polylines(path):
+            d.polygon([(x * k, y * k) for x, y in poly], fill=color)
         return im.resize((px, px), Image.LANCZOS)
     for poly in path_polylines(ICONS[kind]):
         pts = [(x * k, y * k) for x, y in poly]
@@ -530,7 +588,7 @@ class Text:
                     if tok == "\n":
                         atoms.append({"kind": "nl", "s": "", "w": 0, "color": col, "role": None})
                     elif tok.isspace():
-                        atoms.append({"kind": "space", "s": " ", "w": F.font("bold" if bold else "regular", size * S).getlength(" ") / S, "color": col, "role": "bold" if bold else "regular"})
+                        atoms.append({"kind": "space", "s": " ", "w": F.font(face(bold), size * S).getlength(" ") / S, "color": col, "role": face(bold)})
                     else:
                         # split the word into runs by font, and let CJK break per character
                         run, role = [], None
@@ -653,8 +711,9 @@ def _cols(a: list[float], runs: list[list[int]], w: float, gap: float) -> tuple[
 def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple) -> tuple[list[tuple], float]:
     """Where each media item goes, in css px, and the block's height. Several
     are each shown whole: of every arrangement in rows or in columns that keeps
-    their order, the one whose smallest item is largest, shrunk to centre if it
-    would stand taller than GRID_MAX."""
+    their order and fits the column's width under GRID_MAX, the one whose
+    smallest item is largest. Only when none fits is one shrunk to centre,
+    which leaves the width beside it empty."""
     n = len(items)
     gap = 2
     if n == 1:
@@ -667,14 +726,15 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
         return [(it, x, y, w, h, "contain")], h
     raw = [(it.get("w") or 16) / (it.get("h") or 9) for it in items]
     a = [min(max(v, ASPECT[0]), ASPECT[1]) for v in raw]
-    best, best_score = None, -1.0
+    best, best_score = None, (False, -1.0)
     for runs in _groups(n):
         for arrange in (_rows, _cols):
             boxes, h = arrange(a, runs, w, gap)
             k = min(1.0, w * GRID_MAX / h)
-            # the smallest item, as large as it can be, less the width left empty
-            score = min(bw * bh for _, _, _, bw, bh in boxes) * k * k * k
-            if score > best_score + 1e-6:
+            # one that fits beats any that is shrunk; then the smallest item,
+            # as large as it can be, less the width left empty
+            score = (k == 1.0, min(bw * bh for _, _, _, bw, bh in boxes) * k * k * k)
+            if score > (best_score[0], best_score[1] + 1e-6):
                 best, best_score = (boxes, h, k), score
     boxes, h, k = best
     left = x + w * (1 - k) / 2
@@ -684,9 +744,11 @@ def media_boxes(items: list[dict], x: float, y: float, w: float, corners: tuple)
 
 
 def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | None = None, max_lines: int = MAX_LINES,
-           media_only: bool = False) -> Layout:
+           media_only: bool = False, feed: bool = False) -> Layout:
     """With `media_only`, the media of the post and each quote it shows,
-    stacked edge to edge with nothing else; a post without media is drawn whole."""
+    stacked edge to edge with nothing else; a post without media is drawn whole.
+    A Substack note is drawn as on its own page, or with `feed` as in a list
+    of notes."""
     T = palette(theme, post.get("site"))
     L = Layout(COL * S, 0, T)
     ops = L.ops
@@ -734,6 +796,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         h = px(y)
         L.height = h + (h % 2)
         return _lead_cell(L)
+    if post.get("site") == "substack":
+        from . import notecard
+        return notecard.layout(post, theme, stats, now, max_lines, feed)
 
     def quote_block(q, x, y, w, depth):
         """A quoted post as a card; returns its height."""
@@ -780,42 +845,6 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
         ops[box_index] = ("box", px(x), px(top), px(w), px(y - top), px(16), T["line"], None)
         return y - top
 
-    def clipped(spans, size, bold, color, w, n):
-        """Text cut at n lines with no "Show more": a card's lines just stop."""
-        t = Text.make(spans, size, 20, bold, color, color, w, n, color)
-        if t.truncated:
-            t.lines = t.lines[:n]
-            t.height = n * t.lh
-        return t
-
-    def link_block(c, x, y, w):
-        """An article or link as a preview card: its image, then where it is
-        from, its title and a line or two of its description."""
-        top = y
-        if c.get("image"):
-            ih = w * 9 / 16
-            ops.append(("image", c["image"], px(x), px(y), px(w), px(ih), px(16), (True, True, False, False), "cover"))
-            y += ih
-        y += 12
-        ix, iw = x + 12, w - 24
-        site = c["site"] + (" · Paid" if c.get("paid") else "")
-        if site:
-            st, _ = _line(site, False, 13, T["gray"], iw)
-            ops.append(("lines", st, px(ix), px(y)))
-            y += 20
-        if c["title"]:
-            t = clipped([{"text": c["title"], "link": False}], 15, True, T["text"], iw, 2)
-            ops.append(("lines", t, px(ix), px(y)))
-            y += t.height
-        if c["text"]:
-            t = clipped([{"text": c["text"], "link": False}], 15, False, T["gray"], iw, 2)
-            ops.append(("lines", t, px(ix), px(y)))
-            y += t.height
-        y += 12
-        # drawn last, so its edge lies over the image's
-        ops.append(("box", px(x), px(top), px(w), px(y - top), px(16), T["line"], None))
-        return y - top
-
     y = PAD
     x0, cw = PAD + AVATAR + GAP, COL - PAD - AVATAR - GAP - PAD
     ops.append(("avatar", post["avatar"], px(PAD), px(y), px(AVATAR)))
@@ -847,23 +876,9 @@ def layout(post: dict, theme: str = "dark", stats: bool = True, now: float | Non
     if post.get("quote"):
         y += 12
         y += quote_block(post["quote"], x0, y, cw, 9)
-    if post.get("card"):
-        y += 12
-        y += link_block(post["card"], x0, y, cw)
     # actions
     y += 12
-    if stats and post.get("site") == "substack":
-        # Substack's order, and no views or bookmarks
-        groups = [("s_like", count(post["likes"])), ("s_reply", count(post["replies"])), ("s_restack", count(post["reposts"]))]
-        step = (cw - 18.75 - 20) / len(groups)
-        for i, (k, c) in enumerate(groups):
-            gx = x0 + i * step
-            ops.append(("icon", k, px(gx), px(y + 6), px(18.75), T["gray"]))
-            if c:
-                ops.append(("text", c, "regular", 13, px(gx + 18.75 + 8), px(y + 8), T["gray"]))
-        ops.append(("icon", "s_share", px(x0 + cw - 18.75), px(y + 6), px(18.75), T["gray"]))
-        y += 32
-    elif stats:
+    if stats:
         groups = [("reply", count(post["replies"])), ("repost", count(post["reposts"])), ("like", count(post["likes"]))]
         if post.get("views") is not None:
             groups.append(("views", count(post["views"])))
@@ -902,12 +917,14 @@ def _mask(w: int, h: int, r: int, corners: tuple) -> Image.Image:
 
 
 def _fit(im: Image.Image, w: int, h: int, fit: str, bg) -> Image.Image:
+    """`cover` fills the box and crops round the middle, `top` crops from
+    the top down, anything else shows it whole."""
     iw, ih = im.size
-    if fit == "cover":
+    if fit in ("cover", "top"):
         k = max(w / iw, h / ih)
         nw, nh = max(1, int(round(iw * k))), max(1, int(round(ih * k)))
         im = im.resize((nw, nh), Image.LANCZOS)
-        l, t = (nw - w) // 2, (nh - h) // 2
+        l, t = (nw - w) // 2, 0 if fit == "top" else (nh - h) // 2
         return im.crop((l, t, l + w, t + h))
     k = min(w / iw, h / ih)
     nw, nh = max(1, int(round(iw * k))), max(1, int(round(ih * k)))
@@ -915,6 +932,48 @@ def _fit(im: Image.Image, w: int, h: int, fit: str, bg) -> Image.Image:
     out = Image.new("RGBA", (w, h), bg)
     out.paste(im, ((w - nw) // 2, (h - nh) // 2), im)
     return out
+
+
+# how much of an article's cover shows down its card: whole to 30%, gone by 80%
+FADE = [(0.30, 1.0), (0.41, 0.95), (0.47, 0.87), (0.53, 0.75), (0.59, 0.6), (0.65, 0.42), (0.71, 0.22), (0.80, 0.0)]
+
+
+def _postcard(src: Image.Image | None, w: int, h: int, ih: int, tint: tuple | None) -> Image.Image:
+    """An article card's ground as Substack draws it: the cover across the
+    top fading into itself blurred, under a wash of the cover's muted colour,
+    and darkening towards the bottom for the text over it."""
+    tint = tuple(tint or (35, 37, 37))
+    out = Image.new("RGBA", (w, h), tint + (255,))
+    if src is not None:
+        # blurred at an eighth of the size: the same look, and far quicker
+        k = 8
+        back = _fit(src, max(1, round(w * 1.3 / k)), max(1, round(h * 1.3 / k)), "cover", "#000000")
+        back = back.filter(ImageFilter.GaussianBlur(32 * S / k)).resize((round(w * 1.3), round(h * 1.3)), Image.BILINEAR)
+        l, t = (back.width - w) // 2, (back.height - h) // 2
+        out.alpha_composite(back.crop((l, t, l + w, t + h)))
+        out.alpha_composite(Image.new("RGBA", (w, h), tint + (204,)))
+        if ih:
+            cover = _fit(src, w, ih, "top", "#000000")
+            alpha = Image.new("L", (1, ih))
+            for v in range(ih):
+                alpha.putpixel((0, v), round(255 * _faded(v / ih)))
+            cover.putalpha(alpha.resize((w, ih)))
+            out.alpha_composite(cover)
+    shade = Image.new("L", (1, h))
+    for v in range(h):
+        shade.putpixel((0, v), round(255 * 0.3 * v / max(1, h - 1)))
+    out.alpha_composite(Image.merge("RGBA", (*Image.new("RGB", (w, h), (0, 0, 0)).split(), shade.resize((w, h)))))
+    return out
+
+
+def _faded(t: float) -> float:
+    """How much of the cover shows `t` of the way down it."""
+    if t <= FADE[0][0]:
+        return 1.0
+    for (p0, a0), (p1, a1) in zip(FADE, FADE[1:]):
+        if t <= p1:
+            return a0 + (a1 - a0) * (t - p0) / (p1 - p0)
+    return 0.0
 
 
 def render(L: Layout, holes: bool = True, size: tuple[int, int] | None = None) -> bytes:
@@ -952,10 +1011,23 @@ def draw(L: Layout, holes: bool = True) -> Image.Image:
                 tile = _fit(src, size, size, "cover", T["ph"])
             im.paste(tile, (x, y), circle)
         elif k in ("image", "poster"):
-            _, url, x, y, w, h, r, corners, fit = op
+            # a ninth field is the width left showing, where a row of them is cut off
+            _, url, x, y, w, h, r, corners, fit = op[:9]
             src = fetch_image(url)
             tile = Image.new("RGBA", (w, h), "#000000" if k == "poster" else T["ph"]) if src is None else _fit(src, w, h, fit, "#000000")
+            if len(op) > 9 and op[9] < w:
+                w = op[9]
+                tile = tile.crop((0, 0, w, h))
             im.paste(tile, (x, y), _mask(w, h, r, corners))
+        elif k == "fill":
+            # a shape that lets what is under it through: rgba
+            _, x, y, w, h, r, color = op
+            layer = Image.new("RGBA", (w, h), color[:3] + (0,))
+            layer.putalpha(_mask(w, h, r, (True,) * 4).point(lambda v: v * color[3] // 255))
+            im.alpha_composite(layer, (x, y))
+        elif k == "postcard":
+            _, url, x, y, w, h, ih, r, tint = op
+            im.paste(_postcard(fetch_image(url), w, h, ih, tint), (x, y), _mask(w, h, r, (True,) * 4))
         elif k == "icon":
             _, kind, x, y, size, color = op
             ic = icon(kind, size, color)

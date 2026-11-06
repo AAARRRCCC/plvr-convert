@@ -59,7 +59,7 @@ def layout(user: dict, posts: list[dict], theme: str = "dark", stats: bool = Tru
     heights = [header.height] * COLS
     placed, rules = [], []
     for p in posts:
-        L = card.layout(_still(p, depth), theme, stats, max_lines=lines)
+        L = card.layout(_still(p, depth), theme, stats, max_lines=lines, feed=True)
         k = heights.index(min(heights))
         x = k * (colw + S)
         if heights[k] > header.height:

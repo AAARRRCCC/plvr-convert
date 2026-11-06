@@ -35,9 +35,13 @@ for a Substack upload). Each render logs its megapixel-frames per second, to
 tune the budget by. A render that still runs past Discord's wait is cut short
 in the preview.
 
-Substack notes work the same way (`app/substack.py`): swap `substack.com` for
-the embed domain in `/@<user>/note/c-<id>`, or `/@<user>` for the profile with
-their latest notes. The flags apply as on x.com, except `lang`.
+Substack notes work the same way (`app/substack.py`) on the embed domain's
+`substack.` subdomain: put `substack.<embed domain>` in place of
+`substack.com` in `/@<user>/note/c-<id>`, or `/@<user>` for the profile with
+their latest notes. A note is drawn as substack.com shows it on its own page
+(`app/notecard.py`), with its date in `NOTE_TZ`. The flags apply as on x.com,
+except `lang`. The same paths on the embed domain itself, the older form,
+still work.
 
 A profile link (`/<user>`) unfurls as an image of the profile: its header and
 the user's 6 latest posts in two columns (`app/profile.py`). `/help` and
@@ -69,7 +73,7 @@ Flags in the link change the render (`app/flags.py`). x.com's own `s=20`,
 e.g. `/<user>/status/<id>?s=20&v2=image` keeps a quoted video as a still.
 Env: `EMBED_DIR` (where renders are kept, default `/tmp/embed`), `RENDER_TTL`,
 `EMBED_MAX_MB`, `RENDERS`, `RENDER_QUEUE`, `MAX_RENDER`, `RENDER_BUDGET`, `X264_PRESET`,
-`TARGET_MB`, `PROFILE_TTL`, `PROFILE_POSTS`.
+`TARGET_MB`, `PROFILE_TTL`, `PROFILE_POSTS`, `NOTE_TZ` (default `America/New_York`).
 
 ## Run it
 

@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import embed, flags, guide, profile, shard, tweet
+from app import card, embed, flags, guide, profile, shard, tweet
 from app import resolve as rs
 from test_embed_scale import BROWSER, DISCORDBOT, TELEGRAM, Live
 
@@ -141,6 +141,18 @@ def test_board_keeps_its_columns_even():
     xs = [x for x, _, _ in b.posts]
     assert len(b.posts) == 6 and set(xs) == {0, xs[-1]} and xs.count(0) == 3
     assert b.height >= max(y + L.height for _, y, L in b.posts) and b.height % 2 == 0
+
+
+def test_a_grid_fills_the_column_when_an_arrangement_fits():
+    # a landscape and a portrait: stacked they'd stand too tall and shrink to
+    # a strip in the middle of the column, so they go side by side
+    items = [{"kind": "photo", "url": "a", "w": 1024, "h": 739}, {"kind": "photo", "url": "b", "w": 554, "h": 692}]
+    boxes, h = card.media_boxes(items, 0, 0, 514, (True,) * 4)
+    assert {round(b[2]) for b in boxes} == {0} and round(boxes[-1][1] + boxes[-1][3]) == 514
+    # two very tall ones fit no way: shrunk to centre
+    items = [dict(it, w=300, h=1000) for it in items]
+    boxes, h = card.media_boxes(items, 0, 0, 514, (True,) * 4)
+    assert boxes[0][1] > 0 and h == pytest.approx(514 * card.GRID_MAX)
 
 
 def test_top_picks_the_most_liked():

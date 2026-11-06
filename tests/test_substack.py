@@ -57,9 +57,11 @@ def test_a_note_reads_as_a_post():
         {"type": "video", "media_upload_id": "up", "mediaUpload": {"state": "transcoded", "width": 1920, "height": 1080, "duration": 12.5}},
         {"type": "comment", "comment": quoted},
         {"type": "post", "post": {"title": "An article", "subtitle": "about things", "canonical_url": "https://w.substack.com/p/a",
-                                  "cover_image": None, "audience": "only_paid"}, "publication": {"name": "The Pub"}},
+                                  "cover_image": None, "audience": "only_paid", "truncated_body_text": "It began",
+                                  "coverImagePalette": {"Muted": {"rgb": [124, 124.4, 10]}}},
+         "publication": {"name": "The Pub"}, "postSelection": {"text": " a passage "}},
         {"type": "missing", "reason": "unavailable"},
-    ])
+    ], user_primary_publication={"id": 1})
     p = substack._normalize(r)
     assert p["site"] == "substack" and p["url"] == "https://substack.com/@writer/note/c-9"
     assert (p["likes"], p["reposts"], p["replies"], p["views"]) == (5, 2, 3, None)
@@ -68,8 +70,10 @@ def test_a_note_reads_as_a_post():
     assert photo["url"].startswith("https://substackcdn.com/image/fetch/w_1200,") and "f_jpg" in photo["url"]
     assert (photo["w"], photo["h"]) == (4284, 5712)
     assert video["url"] == substack.VIDEO.format(id="up") and video["duration"] == 12.5
-    assert p["card"] == {"url": "https://w.substack.com/p/a", "site": "The Pub", "title": "An article", "text": "about things",
-                         "image": None, "paid": True}
+    assert p["card"] == {"url": "https://w.substack.com/p/a", "site": "The Pub", "logo": None, "title": "An article",
+                         "text": "about things", "excerpt": "It began", "image": None, "tint": (124, 124, 10),
+                         "selection": "a passage", "paid": True}
+    assert p["subscribe"] and not substack._normalize(raw(1))["subscribe"]
     assert substack._normalize(substack._quoted(r))["handle"] == "other"
 
 
@@ -139,14 +143,67 @@ def test_timeline_keeps_own_top_level_notes(monkeypatch):
     assert u["avatar"].startswith("https://substackcdn.com/image/fetch/w_400,")
 
 
-def test_a_note_draws_in_substacks_colours():
+def test_a_note_draws_as_substack_shows_it():
     p = substack._normalize(raw(1, attachments=[{"type": "link", "linkMetadata": {"url": "https://a.b", "host": "a.b", "title": "A",
                                                                                    "description": "B", "image": None}}]))
     L = card.layout(p)
     icons = [op[1] for op in L.ops if op[0] == "icon"]
-    assert icons == ["s_like", "s_reply", "s_restack", "s_share"]
-    assert L.theme["blue"] == card.ACCENTS["substack"]
+    # the menu dots, the link's save button, then Substack's action row
+    assert icons == ["s_more", "s_save", "s_like", "s_reply", "s_restack", "s_share"]
+    assert L.theme == card.SUBSTACK["dark"] and card.palette("dim", "substack") == card.SUBSTACK["dark"]
+    # no publication of their own: no Subscribe
+    assert not any(op[0] == "fill" and op[-1] == (255, 103, 25, 255) for op in L.ops)
+    # the likes and restacks under the rule; no replies there
+    assert "5 Likes ∙ 2 Restacks" in words(L)
     card.render(L)
+    # in a profile's board: nothing under the action row
+    assert "5 Likes ∙ 2 Restacks" not in words(card.layout(p, feed=True))
+
+
+def words(L: card.Layout) -> list[str]:
+    """Every line of text the layout draws."""
+    return ["".join(a["s"] for a in line) for op in L.ops if op[0] == "lines" for line in op[1].lines]
+
+
+def photos(*sizes) -> dict:
+    return substack._normalize(raw(1, attachments=[{"type": "image", "imageUrl": UPLOAD, "imageWidth": w, "imageHeight": h} for w, h in sizes]))
+
+
+def test_several_images_stand_in_a_row_the_edge_cuts_off():
+    L = card.layout(photos((1024, 739), (554, 692)))
+    first, second = [op for op in L.ops if op[0] == "image"]
+    S = card.S
+    # each 300 tall at its own shape, 8 apart
+    assert first[5] == second[5] == 300 * S
+    assert first[4] == round(300 * 1024 / 739 * S) and second[2] - (first[2] + first[4]) in (8 * S - 1, 8 * S, 8 * S + 1)
+    # the second is cut where the column ends, its right corners with it
+    assert len(first) == 9 and second[9] == card.COL * S - 16 * S - second[2]
+    assert second[7] == (True, False, False, True)
+    assert any(op[0] == "icon" and op[1] == "s_next" for op in L.ops)
+    # all of them fitting: nothing cut, no button
+    L = card.layout(photos((200, 300), (200, 300)))
+    assert all(len(op) == 9 for op in L.ops if op[0] == "image") and not any(op[1] == "s_next" for op in L.ops if op[0] == "icon")
+
+
+def test_one_image_is_drawn_at_half_its_pixels():
+    S = card.S
+    (im,) = [op for op in card.layout(photos((300, 300))).ops if op[0] == "image"]
+    assert (im[4], im[5]) == (150 * S, 150 * S)
+    # no wider than the column, no taller than TALL
+    (im,) = [op for op in card.layout(photos((4000, 1000))).ops if op[0] == "image"]
+    assert im[4] == (card.COL - 32) * S
+    (im,) = [op for op in card.layout(photos((1170, 2532))).ops if op[0] == "image"]
+    assert im[5] == 420 * S
+
+
+def test_the_date_under_a_note_is_in_its_zone(monkeypatch):
+    from app import notecard
+    monkeypatch.setattr(notecard, "TZ", "America/New_York")
+    t = substack._when("2026-11-06T14:03:47.439Z")
+    assert notecard.stamp(t, t + 60) == "Nov 6 at 9:03 AM"
+    assert notecard.stamp(substack._when("2025-07-04T23:30:00Z"), t) == "Jul 4, 2025 at 7:30 PM"
+    assert [notecard.age(t, t + d) for d in (5, 7 * 3600, 6 * 86400)] == ["1m", "7h", "6d"]
+    assert notecard.age(t, t + 8 * 86400) == "Nov 6"
 
 
 # ------------------------------------------------------------------ links ---
@@ -176,6 +233,25 @@ def test_a_browser_goes_on_to_substack():
         assert r.status_code == 302 and r.headers["location"] == f"https://substack.com{path}", path
     r = c.get("/writer/status/123", headers={"User-Agent": BROWSER}, follow_redirects=False)
     assert r.headers["location"] == "https://x.com/writer/status/123"
+
+
+SUB = f"substack.{HOST}"
+
+
+def test_on_substack_dot_this_host_every_path_is_substacks(notes):
+    c = TestClient(embed.app, base_url=f"https://{SUB}")
+    for path in ("/@writer/note/c-123", "/@writer", "/writer", "/writer/status/123"):
+        r = c.get(path, headers={"User-Agent": BROWSER}, follow_redirects=False)
+        assert r.status_code == 302 and r.headers["location"] == f"https://substack.com{path}", path
+    # an x.com post's path is nothing to draw there: Discord goes on too
+    r = c.get("/writer/status/123", headers={"User-Agent": DISCORDBOT}, follow_redirects=False)
+    assert r.headers["location"] == "https://substack.com/writer/status/123" and notes == []
+    r = c.get("/@writer/note/c-123", headers={"User-Agent": DISCORDBOT})
+    assert f'og:image" content="https://{SUB}/m/ss_123.png"' in r.text
+    assert c.get("/m/ss_123.png").headers["content-type"] == "image/png"
+    # the guide's links are x.com's, on the host itself
+    text = c.get("/help", headers={"User-Agent": "curl/8"}).text
+    assert f"Swap x.com for {HOST}," in text and SUB not in text
 
 
 def test_a_note_for_discord_is_its_image(notes):
@@ -299,7 +375,7 @@ def test_the_smallest_file_that_fills_the_cell_is_read():
 def test_a_long_video_is_drawn_smaller():
     L = card.layout(substack._normalize(raw(1, attachments=[dict(LONG)])))
     assert embed._scale(L, 10) == 1.0 and embed._scale(L, 0) == 1.0
-    assert embed._scale(L, 77) == embed.MIN_SCALE
+    assert embed._scale(L, 120) == embed.MIN_SCALE
     k = embed._scale(L, 30)
     assert embed.MIN_SCALE < k < 1
     small = shot.scaled(L, k)

@@ -291,17 +291,25 @@ def _media(raw: dict) -> list[dict]:
 
 
 def _card(raw: dict) -> dict | None:
-    """The article or link the note carries, as a preview card."""
+    """The article or link the note carries, as a preview card: its cover,
+    where it is from, its title, subtitle and opening lines, and the colour
+    Substack washes the card in. A passage picked out of an article is
+    "selection", which Substack shows in its place."""
     for a in raw.get("attachments") or []:
         if a.get("type") == "post" and a.get("post"):
             p, pub = a["post"], a.get("publication") or {}
-            return {"url": p.get("canonical_url"), "site": pub.get("name") or "", "title": p.get("title") or "",
-                    "text": p.get("subtitle") or p.get("description") or "", "image": _img(p.get("cover_image"), 1200),
+            muted = ((p.get("coverImagePalette") or {}).get("Muted") or {}).get("rgb")
+            return {"url": p.get("canonical_url"), "site": pub.get("name") or "", "logo": _img(pub.get("logo_url"), 80),
+                    "title": p.get("title") or "", "text": p.get("subtitle") or p.get("description") or "",
+                    "excerpt": p.get("truncated_body_text") or "", "image": _img(p.get("cover_image"), 1200),
+                    "tint": tuple(round(c) for c in muted) if muted else None,
+                    "selection": ((a.get("postSelection") or {}).get("text") or "").strip(),
                     "paid": p.get("audience") not in (None, "everyone")}
         if a.get("type") == "link" and a.get("linkMetadata"):
             m = a["linkMetadata"]
-            return {"url": m.get("url"), "site": m.get("host") or "", "title": m.get("title") or "",
-                    "text": m.get("description") or "", "image": _img(m.get("image"), 1200), "paid": False}
+            return {"url": m.get("url"), "site": m.get("host") or "", "logo": None, "title": m.get("title") or "",
+                    "text": m.get("description") or "", "excerpt": "", "image": _img(m.get("image"), 1200), "tint": None,
+                    "selection": "", "paid": False}
     return None
 
 
@@ -337,6 +345,8 @@ def _normalize(raw: dict, replying_to: str | None = None) -> dict:
         "media": _media(raw),
         "card": _card(raw),
         "quote": None,
+        # a writer with a publication of their own has Subscribe by their name
+        "subscribe": bool(raw.get("user_primary_publication") or u.get("primary_publication")),
     }
 
 

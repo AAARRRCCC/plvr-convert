@@ -6,3 +6,4 @@ brotli==1.2.1
 pillow==13.0.0
 fonttools==4.65.0
 prometheus-client==0.26.0
+tzdata==2026.5
