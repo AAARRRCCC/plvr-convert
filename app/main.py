@@ -4,6 +4,7 @@ POST /api/resolve   {url, mode?}                 -> the media at that link (mode
 POST /api/prepare   {url, item?, options}       -> a signed download link
 GET  /api/download/<name>?t=<token>             -> the file, streamed
 GET  /api/sites                                 -> the sites yt-dlp supports
+GET  /shortcuts/{photos,files}.shortcut          -> the signed iOS companion shortcuts
 GET  /healthz
 """
 from __future__ import annotations
@@ -264,6 +265,19 @@ async def healthz():
 @app.get("/")
 async def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+SHORTCUTS = {"photos", "files"}
+
+
+@app.get("/shortcuts/{which}.shortcut")
+async def shortcut(which: str):
+    # iOS names an imported shortcut after its file: "convert to photos". The
+    # files are signed (tools/make_shortcuts.py says how); iOS refuses unsigned.
+    if which not in SHORTCUTS:
+        return err("no such shortcut", 404)
+    return FileResponse(STATIC / "shortcuts" / f"{which}.shortcut", media_type="application/octet-stream",
+                        filename=f"convert to {which}.shortcut", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.middleware("http")

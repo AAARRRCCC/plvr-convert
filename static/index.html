@@ -125,6 +125,10 @@ select:focus,.opt input:focus{border-color:var(--wave);outline:0}
 .sm:hover{transform:translateY(-2px);box-shadow:0 6px 0 var(--shadow);background:var(--wave-2)}
 .sm:active{transform:translateY(1px);box-shadow:0 1px 0 var(--tag-shadow)}
 .sm[disabled]{opacity:.5;cursor:default;transform:none}
+a.sm{color:inherit;text-decoration:none;display:inline-block}
+html:not(.ios) .ios-only{display:none!important}
+.steps{margin:0;padding-left:22px;display:grid;gap:14px}
+.steps .dl{margin-top:8px}
 .plan{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);margin-top:10px;min-height:18px}
 .plan.err{color:var(--priv)}
 .err-box{border:2px solid var(--priv);background:var(--priv-2);color:var(--priv);border-radius:12px;padding:10px 14px;font-weight:700;margin-top:4px}
@@ -264,6 +268,10 @@ body.dropping .drop{display:grid}
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <span>recent</span>
         </button>
+        <button data-open="iphone" class="ios-only">
+          <svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
+          <span>iphone</span>
+        </button>
         <a class="bm" id="bm" href="#" title="drag me to the bookmarks bar">
           <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
           <span>convert this</span>
@@ -334,6 +342,19 @@ body.dropping .drop{display:grid}
     <div class="body">
       <ul class="dir" id="recent"></ul>
       <div class="set-foot"><span></span><button class="sm" id="forget">forget all</button></div>
+    </div>
+  </section>
+
+  <!-- iphone: cobalt-style companion shortcuts -->
+  <section class="win pop" id="w-iphone" aria-labelledby="t-iphone" hidden>
+    <div class="bar"><span class="dots"><i class="dot"></i><i class="dot"></i></span><span class="title" id="t-iphone">save on iphone</span><button class="close" aria-label="close">×</button></div>
+    <div class="body">
+      <ol class="steps">
+        <li>add the shortcuts
+          <div class="dl"><a class="sm" href="/shortcuts/photos.shortcut">to photos</a><a class="sm" href="/shortcuts/files.shortcut">to files</a></div></li>
+        <li>press share instead of download</li>
+        <li>pick convert to photos, or convert to files for audio and webm</li>
+      </ol>
     </div>
   </section>
 
@@ -482,6 +503,8 @@ body.dropping .drop{display:grid}
 (() => {
   const $ = (s, r=document) => r.querySelector(s), $$ = (s, r=document) => [...r.querySelectorAll(s)];
   const { blip, say, open, close, mobile } = window.plvr;
+  const IOS = (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && !!navigator.share;
+  if(IOS) document.documentElement.classList.add('ios');
   const store = { get: k => { try{ return localStorage.getItem('cv.' + k); }catch(e){ return null; } }, set: (k, v) => { try{ localStorage.setItem('cv.' + k, v); }catch(e){} }, del: k => { try{ localStorage.removeItem('cv.' + k); }catch(e){} } };
   const DEFAULTS = {mode:'auto', quality:'1080', vcodec:'h264', container:'auto', aformat:'best', abitrate:'192', name:'random', custom_name:'', metadata:true, cover:true, gif_width:480, gif_fps:12, shot_depth:1, shot_stats:true};
   const settings = {};
@@ -611,6 +634,7 @@ body.dropping .drop{display:grid}
       </details>
       <div class="dl">
         <button class="big" id="dl" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12M6 11l6 6 6-6"/><path d="M4 21h16"/></svg><span>download</span></button>
+        <button class="sm ios-only" id="share" disabled>share</button>
         <button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button>
       </div>
       <div class="plan" id="plan">working out the best way…</div>`;
@@ -620,6 +644,7 @@ body.dropping .drop{display:grid}
     wireName();
     $('#dl').onclick = () => download();
     $('#copy').onclick = async () => { if(!current || !current.prep) return; try{ await navigator.clipboard.writeText(location.origin + current.prep.url); blip('done'); say('copied. it works for half an hour'); }catch(e){ say('couldn\'t copy'); } };
+    $('#share').onclick = () => { if(current && current.prep) shareLink(current.prep); };
   }
 
   function showPost(m){
@@ -634,6 +659,7 @@ body.dropping .drop{display:grid}
       </div>
       <div class="dl">
         <button class="big" id="dl" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12M6 11l6 6 6-6"/><path d="M4 21h16"/></svg><span>download</span></button>
+        <button class="sm ios-only" id="share" disabled>share</button>
         <button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button>
       </div>
       <div class="plan" id="plan">working out the best way…</div>`;
@@ -641,13 +667,14 @@ body.dropping .drop{display:grid}
     wireName();
     $('#dl').onclick = () => download();
     $('#copy').onclick = async () => { if(!current || !current.prep) return; try{ await navigator.clipboard.writeText(location.origin + current.prep.url); blip('done'); say('copied. it works for half an hour'); }catch(e){ say('couldn\'t copy'); } };
+    $('#share').onclick = () => { if(current && current.prep) shareLink(current.prep); };
   }
 
   function wireName(){
     const name = $('#result-name'), owner = current;
     let nameTimer;
     name.addEventListener('input', () => {
-      ++prepSeq; current.prep = null; $('#dl').disabled = true; $('#copy').disabled = true;
+      ++prepSeq; current.prep = null; $('#dl').disabled = true; $('#copy').disabled = true; $('#share').disabled = true;
       current.local.name = 'custom';
       const suffix = '.' + owner.filenameExt;
       current.local.custom_name = name.value.toLowerCase().endsWith(suffix.toLowerCase()) ? name.value.slice(0, -suffix.length) : name.value;
@@ -664,9 +691,9 @@ body.dropping .drop{display:grid}
 
   async function rePrepare(){
     if(!current || !current.media) return;
-    const seq = ++prepSeq, plan = $('#plan'), dl = $('#dl'), cp = $('#copy');
+    const seq = ++prepSeq, plan = $('#plan'), dl = $('#dl'), cp = $('#copy'), sh = $('#share');
     if(!plan) return;
-    plan.classList.remove('err'); plan.textContent = 'working out the best way…'; dl.disabled = true; cp.disabled = true; current.prep = null;
+    plan.classList.remove('err'); plan.textContent = 'working out the best way…'; dl.disabled = true; cp.disabled = true; sh.disabled = true; current.prep = null;
     try{
       const p = await api('/api/prepare', {url: current.url, item: current.item ?? null, options: options()});
       if(seq !== prepSeq) return;
@@ -675,11 +702,19 @@ body.dropping .drop{display:grid}
       const name = $('#result-name'); if(current.local.name !== 'custom') name.value = p.filename; name.disabled = false;
       const size = fmtSize(p.size);
       plan.textContent = `${p.label}${size ? ' · ~' + size : ''} · ${p.method === 'proxy' ? 'straight from the site' : 'through ffmpeg'} · ${p.filename}`;
-      dl.disabled = false; cp.disabled = false;
+      dl.disabled = false; cp.disabled = false; sh.disabled = false;
     }catch(e){
       if(seq !== prepSeq) return;
       plan.classList.add('err'); plan.textContent = e.message; blip('err');
     }
+  }
+
+  /* ios saves to photos through a companion shortcut: the share sheet gets
+     the signed download link, the shortcut fetches it. safari only allows
+     share() inside a user gesture, about 5s in webkit. */
+  async function shareLink(p, meta){
+    try{ await navigator.share({url: location.origin + p.url}); blip('done'); remember(meta || current.media, p); }
+    catch(e){ if(e.name !== 'AbortError'){ blip('err'); say('couldn\'t open share, try download', true); } }
   }
 
   function download(prep, meta){
@@ -697,14 +732,16 @@ body.dropping .drop{display:grid}
       <p><b>${esc(j.title || 'a few things at that link')}</b>${j.uploader ? `<br><small style="color:var(--ink-2)">${esc(j.uploader)}</small>` : ''}</p>
       <div class="grid">${j.picker.map(m => `<button class="pick" data-i="${m.index}" title="${esc(m.title)}">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : `<div class="ph">${m.has_video ? 'video' : 'audio'}</div>`}<small><span>#${m.index + 1}</span><span>${fmtDur(m.duration) || (m.has_video ? 'video' : 'audio')}</span></small></button>`).join('')}</div>
       <div class="dl"><button class="sm" id="all">download all, one after another</button></div>`;
-    const one = async (btn) => {
+    const one = async (btn, viaShare) => {
       const i = +btn.dataset.i; btn.classList.add('busy');
       try{
         const p = await api('/api/prepare', {url: current.url, item: i, options: options()});
-        download(p, j.picker[i]); btn.classList.remove('busy'); btn.classList.add('done');
+        if(viaShare && navigator.userActivation && navigator.userActivation.isActive) shareLink(p, j.picker[i]);
+        else download(p, j.picker[i]);
+        btn.classList.remove('busy'); btn.classList.add('done');
       }catch(e){ btn.classList.remove('busy'); blip('err'); say(e.message, true); }
     };
-    $$('.pick', result).forEach(btn => btn.onclick = () => { blip('click'); one(btn); });
+    $$('.pick', result).forEach(btn => btn.onclick = () => { blip('click'); one(btn, IOS); });
     $('#all').onclick = async () => { blip('click'); for(const btn of $$('.pick', result)){ await one(btn); await new Promise(r => setTimeout(r, 1200)); } };
   }
 
