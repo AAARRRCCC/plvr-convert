@@ -129,6 +129,7 @@ a.sm{color:inherit;text-decoration:none;display:inline-block}
 html:not(.ios) .ios-only{display:none!important}
 .steps{margin:0;padding-left:22px;display:grid;gap:14px}
 .steps .dl{margin-top:8px}
+.pair{display:flex;gap:12px;flex-wrap:nowrap}
 .plan{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);margin-top:10px;min-height:18px}
 .plan.err{color:var(--priv)}
 .err-box{border:2px solid var(--priv);background:var(--priv-2);color:var(--priv);border-radius:12px;padding:10px 14px;font-weight:700;margin-top:4px}
@@ -634,8 +635,7 @@ body.dropping .drop{display:grid}
       </details>
       <div class="dl">
         <button class="big" id="dl" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12M6 11l6 6 6-6"/><path d="M4 21h16"/></svg><span>download</span></button>
-        <button class="sm ios-only" id="share" disabled>share</button>
-        <button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button>
+        <span class="pair"><button class="sm ios-only" id="share" disabled>share</button><button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button></span>
       </div>
       <div class="plan" id="plan">working out the best way…</div>`;
     if(isAudioOnly && settings.mode !== 'audio') current.local.mode = 'audio';
@@ -659,8 +659,7 @@ body.dropping .drop{display:grid}
       </div>
       <div class="dl">
         <button class="big" id="dl" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12M6 11l6 6 6-6"/><path d="M4 21h16"/></svg><span>download</span></button>
-        <button class="sm ios-only" id="share" disabled>share</button>
-        <button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button>
+        <span class="pair"><button class="sm ios-only" id="share" disabled>share</button><button class="sm" id="copy" disabled title="a link to this file, good for half an hour">copy link</button></span>
       </div>
       <div class="plan" id="plan">working out the best way…</div>`;
     $$('#result select').forEach(el => { const k = el.dataset.k; el.value = String(current.local[k] ?? settings[k]); el.addEventListener('change', () => { blip('click'); current.local[k] = isNaN(+el.value) ? el.value : +el.value; rePrepare(); }); });

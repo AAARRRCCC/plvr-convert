@@ -206,9 +206,16 @@ class Fmt:
         """A plain file over HTTP, which can be passed through unmodified."""
         return self.protocol in ("http", "https")
 
+    @property
+    def p(self) -> int:
+        """The "1080" of 1080p: the short side, so a vertical 1080x1920 reel is
+        1080p, as YouTube and cobalt count it. The height when the width is unknown."""
+        return min(self.width, self.height) if self.width and self.height else self.height
+
 
 def formats(info: dict) -> list[Fmt]:
     out: list[Fmt] = []
+    instagram = (info.get("extractor_key") or "").lower() == "instagram"
     for f in info.get("formats") or [info]:
         url = f.get("url")
         if not url:
@@ -231,6 +238,10 @@ def formats(info: dict) -> list[Fmt]:
         if not has_v and not has_a:
             continue
         kind = "progressive" if has_v and has_a else ("video" if has_v else "audio")
+        if instagram and kind == "progressive" and vc is None and ext == "mp4":
+            # Instagram's plain mp4s (its video_versions, which yt-dlp lists with no
+            # codec or size) are always h264; its labelled dash streams are vp9.
+            vfam = "h264"
         if has_v and vfam is None:
             vfam = "other"
         if has_a and afam is None:
@@ -256,7 +267,7 @@ def formats(info: dict) -> list[Fmt]:
 def describe(info: dict) -> dict:
     """What the page shows for one piece of media."""
     fs = formats(info)
-    heights = sorted({f.height for f in fs if f.kind != "audio" and f.height}, reverse=True)
+    heights = sorted({f.p for f in fs if f.kind != "audio" and f.p}, reverse=True)
     vcodecs = sorted({f.vcodec for f in fs if f.vcodec and f.vcodec != "other"})
     thumb = info.get("thumbnail")
     if not thumb and info.get("thumbnails"):

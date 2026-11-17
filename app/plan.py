@@ -113,19 +113,21 @@ def _ordered_codecs(pref: str) -> list[str]:
 
 
 def _best_video(fs: list[Fmt], o: dict) -> Fmt | None:
-    """Highest quality at or under the cap, in the preferred codec if it exists there."""
+    """The preferred codec at the highest quality it has under the cap, as
+    cobalt does: picking h264 means a file an iPhone plays, even where vp9 goes
+    higher. Another codec only when the preferred one isn't there at all. The cap
+    is on the short side (Fmt.p), so a vertical 1080x1920 video is 1080p."""
     cap = 10 ** 6 if o["quality"] == "max" else int(o["quality"])
     vids = [f for f in fs if f.kind != "audio"]
     if not vids:
         return None
-    under = [f for f in vids if (f.height or 0) <= cap] or [min(vids, key=lambda f: f.height or 0)]
-    top = max(f.height or 0 for f in under)
+    under = [f for f in vids if f.p <= cap] or [min(vids, key=lambda f: f.p)]
     for codec in _ordered_codecs(o["vcodec"]):
-        at = [f for f in under if (f.height or 0) == top and f.vcodec == codec]
+        at = [f for f in under if f.vcodec == codec]
         if at:
             # sdr over hdr, a plain file over a playlist, then the highest bitrate
-            return max(at, key=lambda f: (not f.hdr, f.direct, f.kind == "video", f.tbr, f.fps))
-    return max(under, key=lambda f: (f.height or 0, not f.hdr, f.direct, f.tbr))
+            return max(at, key=lambda f: (f.p, not f.hdr, f.direct, f.kind == "video", f.tbr, f.fps))
+    return max(under, key=lambda f: (f.p, not f.hdr, f.direct, f.tbr))
 
 
 def _best_audio(fs: list[Fmt], want: str | None) -> Fmt | None:
@@ -221,7 +223,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
             if prog:
                 a = max(prog, key=lambda f: (f.direct, f.abr or f.tbr))
     ext = _container(o, v, a)
-    qual = f"{v.height}p" if v.height else "video"
+    qual = f"{v.p}p" if v.p else "video"
     size = v.size + (a.size if a and a is not v else 0)
 
     # the pass-through case: one plain file that is already what was asked for
@@ -249,7 +251,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
 
 
 def _mute(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
-    qual = f"{v.height}p" if v.height else "video"
+    qual = f"{v.p}p" if v.p else "video"
     ext = _container(o, v, None)
     if v.kind == "video" and v.direct and not clip and (o["container"] == "auto" or o["container"] == v.ext):
         ext = v.ext if v.ext in MIME else "mp4"
