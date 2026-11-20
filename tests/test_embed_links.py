@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import card, embed, flags, guide, profile, shard, tweet
+from app import card, embed, flags, guide, profile, shard, shot, tweet
 from app import resolve as rs
 from test_embed_scale import BROWSER, DISCORDBOT, TELEGRAM, Live
 
@@ -349,3 +349,18 @@ def test_gifs_over_the_cap_go_least_recently_served_first(tmp_path, monkeypatch)
     embed._prune_gifs()
     assert not (d / f"{old}.gif").exists() and not (d / f"{old}.json").exists()
     assert (d / f"{mid}.gif").exists() and (d / f"{new}.gif").exists()
+
+
+def test_a_long_video_drawn_small_reads_a_smaller_file():
+    base = "https://video.twimg.com/ext_tw_video/1/pu/"
+    m = {"type": "video", "width": 1280, "height": 720, "duration": 95, "variants": [
+        {"url": base + "pl/a.m3u8", "bitrate": 0, "content_type": "application/x-mpegURL"},
+        {"url": base + "vid/480x270/s.mp4?tag=10", "bitrate": 256000, "content_type": "video/mp4"},
+        {"url": base + "vid/640x360/m.mp4?tag=10", "bitrate": 832000, "content_type": "video/mp4"},
+        {"url": base + "vid/1280x720/h.mp4?tag=10", "bitrate": 2176000, "content_type": "video/mp4"},
+        {"url": base + "vid/1920x1080/x.mp4?tag=10", "bitrate": 5000000, "content_type": "video/mp4"}]}
+    item = tweet._media({"media": {"all": [m]}})[0]
+    assert item["url"].endswith("h.mp4?tag=10")
+    assert [v["w"] for v in item["variants"]] == [480, 640, 1280]       # 1080p is over MAX_SIDE
+    assert shot.source(item, 1036, 584, "contain").endswith("h.mp4?tag=10")   # a full-size cell
+    assert shot.source(item, 652, 368, "contain").endswith("m.mp4?tag=10")    # a long video's cell

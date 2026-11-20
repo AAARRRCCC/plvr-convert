@@ -250,6 +250,20 @@ def _pick_variant(m: dict) -> tuple[str | None, int]:
     return best, max(br, 0)
 
 
+def _files(m: dict) -> list[dict]:
+    """Each mp4 of a video with its size, up to MAX_SIDE: shot.source reads
+    the smallest that fills the cell, so a video drawn small (a long one)
+    decodes 360p rather than 720p."""
+    files = []
+    for v in m.get("variants") or []:
+        dims = re.search(r"/(\d+)x(\d+)/", str(v.get("url", "")))
+        if dims and str(v.get("url", "")).split("?")[0].endswith(".mp4"):
+            w, h = int(dims.group(1)), int(dims.group(2))
+            if max(w, h) <= MAX_SIDE:
+                files.append({"url": v["url"], "w": w, "h": h})
+    return files
+
+
 def _media(raw: dict) -> list[dict]:
     out = []
     for m in ((raw.get("media") or {}).get("all") or [])[:4]:
@@ -264,6 +278,8 @@ def _media(raw: dict) -> list[dict]:
             if not url:
                 continue
             item["url"] = url
+            if files := _files(m):
+                item["variants"] = files
             item["poster"] = m.get("thumbnail_url")
             item["duration"] = float(m.get("duration") or 0)
         if not item["url"]:
