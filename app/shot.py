@@ -25,7 +25,13 @@ log = logging.getLogger("convert.shot")
 MAX_DURATION = 600   # x.com's own cap is ten minutes for most accounts
 GIF_LOOP = 10        # seconds a leading gif is looped to: a chat app plays the video once
 FPS = 30
-SLACK = 1.1          # how far a video's file may be stretched before a bigger one is read
+# how far a video's file may be stretched before a bigger one is read: a long
+# video's cell at 0.63 of 2x is 750x422, which 640x360 fills at 1.17
+SLACK = 1.25
+# ffmpeg runs a filter graph on one thread unless told otherwise, and the
+# scale, pad and overlays were most of a long video's compose: 4 took a 95s
+# post from ~7.7s to ~5.6s on k3s-gpu, and more threads did no better
+FILTER_THREADS = int(os.environ.get("FILTER_THREADS", 4))
 FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 
 
@@ -166,7 +172,8 @@ def command(shot: Shot, preset: str = "veryfast") -> list[str]:
     """ffmpeg reading the card png on stdin and each video through the tunnel,
     everything up to the output: the caller adds where it goes."""
     L, p = shot.layout, shot.plan
-    argv = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-f", "png_pipe", "-i", "pipe:0"]
+    argv = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-filter_complex_threads", str(FILTER_THREADS),
+            "-f", "png_pipe", "-i", "pipe:0"]
     for c in L.cells:
         f = _fmt(dict(c.item, url=source(c.item, c.w, c.h, c.fit)))
         assert_public(f.url)

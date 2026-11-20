@@ -363,4 +363,4 @@ def test_a_long_video_drawn_small_reads_a_smaller_file():
     assert item["url"].endswith("h.mp4?tag=10")
     assert [v["w"] for v in item["variants"]] == [480, 640, 1280]       # 1080p is over MAX_SIDE
     assert shot.source(item, 1036, 584, "contain").endswith("h.mp4?tag=10")   # a full-size cell
-    assert shot.source(item, 652, 368, "contain").endswith("m.mp4?tag=10")    # a long video's cell
+    assert shot.source(item, 750, 422, "contain").endswith("m.mp4?tag=10")    # a 95s video's cell, at 0.63
