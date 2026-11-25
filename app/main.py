@@ -1,7 +1,9 @@
 """convert.plvr.net: a self-hosted video downloader and remuxer.
 
-POST /api/resolve   {url, mode?}                 -> the media at that link (mode "shot": the post itself)
+POST /api/resolve   {url, mode?}                 -> the media at that link (mode "shot": the post itself;
+                                                   mode "photos", or an x.com post of only photos: each photo)
 POST /api/prepare   {url, item?, options}       -> a signed download link
+                    {url, photos, options}      -> photos of a post (a list of indexes, or "all"): one as itself, more as a zip
 GET  /api/download/<name>?t=<token>             -> the file, streamed
 GET  /api/sites                                 -> the sites yt-dlp supports
 GET  /shortcuts/{photos,files}.shortcut          -> the signed iOS companion shortcuts
@@ -21,12 +23,12 @@ from urllib.parse import quote
 
 import yt_dlp
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import plan as planning
 from . import resolve as rs
-from . import shot, stream, tokens, tunnel, tweet
+from . import photos, shot, stream, tokens, tunnel, tweet
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("convert")
@@ -113,6 +115,10 @@ async def api_resolve(req: Request):
         return err("paste a link first")
     if str(body.get("mode") or "") == "shot":
         return await _resolve_post(url, body.get("options"))
+    if str(body.get("mode") or "") == "photos":
+        return await _resolve_photos(url)
+    if (tid := tweet.status_id(url)) and (p := await _photo_post(tid)):
+        return {"key": rs.cache_key(url), "photos": photos.describe(p)}
     try:
         key, info = await rs.resolve(url)
     except rs.ResolveError as e:
@@ -144,6 +150,52 @@ async def _resolve_post(url: str, options) -> JSONResponse | dict:
     return {"key": rs.cache_key(url), "media": shot.describe(post)}
 
 
+async def _resolve_photos(url: str) -> JSONResponse | dict:
+    """Every photo of the post, whatever else it has."""
+    tid = tweet.status_id(url)
+    if not tid:
+        return err("photos work for x.com and twitter.com post links", 422)
+    try:
+        p = await photos.post(tid)
+    except rs.ResolveError as e:
+        return err(str(e), 422)
+    except Exception:
+        log.exception("photos %s", tid)
+        return err("something broke reading that post", 500)
+    if not p["photos"]:
+        return err("that post has no photos", 422)
+    return {"key": rs.cache_key(url), "photos": photos.describe(p)}
+
+
+async def _photo_post(tid: str) -> dict | None:
+    """The post, if it is photos and nothing else; yt-dlp reads every other
+    post, and reads this one too when fxtwitter can't be reached."""
+    try:
+        p = await photos.post(tid)
+    except rs.ResolveError as e:
+        log.info("photos %s: %s, trying yt-dlp", tid, e)
+        return None
+    except Exception:
+        log.exception("photos %s", tid)
+        return None
+    return p if p["photos"] and not p["videos"] else None
+
+
+async def _photos_for(url: str, which) -> tuple[dict, list[int]]:
+    """The post and the photos asked for ("all", or a list of indexes), as
+    indexes in the post's order."""
+    tid = tweet.status_id(url)
+    p = await photos.post(tid) if tid else None
+    if not p or not p["photos"]:
+        raise rs.ResolveError("there are no photos at that link")
+    n = len(p["photos"])
+    if which == "all":
+        return p, list(range(n))
+    if not isinstance(which, list) or not which or not all(type(i) is int and 0 <= i < n for i in which):
+        raise rs.ResolveError("pick which photos you want")
+    return p, sorted(set(which))
+
+
 async def _shot_for(url: str, opts: dict) -> shot.Shot:
     tid = tweet.status_id(url)
     if not tid:
@@ -158,6 +210,20 @@ async def api_prepare(req: Request):
     url = str(body.get("url") or "").strip()
     item = body.get("item")
     opts = planning.normalize(body.get("options"))
+    if body.get("photos") is not None:
+        try:
+            p, sel = await _photos_for(url, body["photos"])
+        except rs.ResolveError as e:
+            return err(str(e), 422)
+        name = photos.filename(p, opts, sel)
+        n = len(p["photos"])
+        payload = {"u": url, "p": "all" if len(sel) == n else sel, "o": {k: v for k, v in opts.items() if v != planning.DEFAULTS.get(k)}}
+        t = tokens.sign(payload)
+        one = p["photos"][sel[0]]
+        label = (f"photo {sel[0] + 1} of {n} · {one['w']}x{one['h']}" if len(sel) == 1
+                 else f"{n} photos · zip" if len(sel) == n else f"{len(sel)} of {n} photos · zip")
+        return {"token": t, "url": f"/api/download/{quote(name)}?t={t}", "method": "proxy", "ext": name.rsplit(".", 1)[-1],
+                "filename": name, "label": label, "size": 0}
     if opts["mode"] == "shot":
         try:
             s = await _shot_for(url, opts)
@@ -190,6 +256,8 @@ async def api_download(name: str, t: str, req: Request):
         return err("that link has expired, paste the video again", 403)
     ip = client_ip(req)
     opts = planning.normalize(payload.get("o"))
+    if payload.get("p") is not None:
+        return await _download_photos(payload, opts, ip)
     s = None
     try:
         if opts["mode"] == "shot":
@@ -227,11 +295,53 @@ async def api_download(name: str, t: str, req: Request):
 
     headers = {
         **started.headers,
-        "Content-Disposition": f"attachment; filename=\"{p.filename.encode('ascii', 'replace').decode()}\"; filename*=UTF-8''{quote(p.filename)}",
+        "Content-Disposition": _attachment(p.filename),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
     }
     return StreamingResponse(body(), status_code=started.status, media_type=p.mime, headers=headers)
+
+
+def _attachment(filename: str) -> str:
+    return f"attachment; filename=\"{filename.encode('ascii', 'replace').decode()}\"; filename*=UTF-8''{quote(filename)}"
+
+
+async def _download_photos(payload: dict, opts: dict, ip: str):
+    try:
+        p, sel = await _photos_for(payload["u"], payload["p"])
+    except rs.ResolveError as e:
+        return err(str(e), 422)
+    name = photos.filename(p, opts, sel)
+    i = sel[0] if len(sel) == 1 else None
+    if not gate.acquire(ip):
+        return err("too many downloads running right now, try again in a moment", 429)
+    headers = {"Content-Disposition": _attachment(name), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+    try:
+        if i is not None:
+            data = await photos.fetch(p["photos"][i]["url"])
+        else:
+            first, rest = await photos.first_and_rest(p, sel)
+    except rs.ResolveError as e:
+        gate.release(ip)
+        return err(str(e), 502)
+    except Exception:
+        gate.release(ip)
+        log.exception("photos failed to start")
+        return err("the download couldn't start", 502)
+    if i is not None:
+        gate.release(ip)
+        log.info("photo %s %d of %d %.1fMB", p["id"], i + 1, len(p["photos"]), len(data) / 1e6)
+        return Response(data, media_type=photos.EXTS[name.rsplit(".", 1)[-1]], headers=headers)
+
+    async def body():
+        try:
+            yield first
+            async for chunk in rest:
+                yield chunk
+        finally:
+            gate.release(ip)
+
+    return StreamingResponse(body(), media_type="application/zip", headers=headers)
 
 
 _sites: list[str] | None = None

@@ -213,6 +213,32 @@ class Fmt:
         return min(self.width, self.height) if self.width and self.height else self.height
 
 
+def _is_gif_url(url: str) -> bool:
+    u = urlparse(url)
+    host = (u.hostname or "").lower()
+    path = u.path.lower()
+    if host.endswith("twimg.com") and "/tweet_video/" in path:
+        return True
+    if host.endswith(("tenor.com", "giphy.com")):
+        return True
+    return path.endswith((".gif", ".gifv"))
+
+
+def is_gif(info: dict, fs: list[Fmt] | None = None) -> bool:
+    """Whether this media item is an animated GIF (a .gif file, or a silent
+    loop served as video like x.com's tweet_video or Tenor/Giphy)."""
+    ext_key = (info.get("extractor_key") or info.get("extractor") or "").lower()
+    if ext_key in ("giphy", "tenor"):
+        return True
+    if (info.get("ext") or "").lower() == "gif":
+        return True
+    page = info.get("webpage_url") or info.get("original_url") or ""
+    if page and urlparse(page).path.lower().endswith((".gif", ".gifv")):
+        return True
+    fs = formats(info) if fs is None else fs
+    return any(f.ext == "gif" or _is_gif_url(f.url) for f in fs)
+
+
 def formats(info: dict) -> list[Fmt]:
     out: list[Fmt] = []
     instagram = (info.get("extractor_key") or "").lower() == "instagram"
@@ -232,9 +258,10 @@ def formats(info: dict) -> list[Fmt]:
         vc, ac = f.get("vcodec"), f.get("acodec")
         vfam, afam = _family(vc, VIDEO_FAMILY), _family(ac, AUDIO_FAMILY)
         # yt-dlp says "none" when it knows a stream is absent and None when it
-        # doesn't know; for the unknowns, guess from the extension.
+        # doesn't know; for the unknowns, guess from the extension (and treat
+        # silent GIF loops like Twitter tweet_video / Tenor / .gif as audio-less).
         has_v = vc != "none" if vc is not None else ext not in AUDIO_EXTS
-        has_a = ac != "none" if ac is not None else True
+        has_a = (ac != "none") if ac is not None else (ext != "gif" and not _is_gif_url(url))
         if not has_v and not has_a:
             continue
         kind = "progressive" if has_v and has_a else ("video" if has_v else "audio")
@@ -267,8 +294,13 @@ def formats(info: dict) -> list[Fmt]:
 def describe(info: dict) -> dict:
     """What the page shows for one piece of media."""
     fs = formats(info)
-    heights = sorted({f.p for f in fs if f.kind != "audio" and f.p}, reverse=True)
+    gif = is_gif(info, fs)
+    vid_fs = [f for f in fs if f.kind != "audio"]
+    heights = sorted({f.p for f in vid_fs if f.p}, reverse=True)
     vcodecs = sorted({f.vcodec for f in fs if f.vcodec and f.vcodec != "other"})
+    max_w = max((f.width for f in vid_fs if f.width), default=None)
+    max_h = max((f.height for f in vid_fs if f.height), default=None)
+    max_fps = max((f.fps for f in vid_fs if f.fps), default=None)
     thumb = info.get("thumbnail")
     if not thumb and info.get("thumbnails"):
         thumb = info["thumbnails"][-1].get("url")
@@ -282,8 +314,12 @@ def describe(info: dict) -> dict:
         "url": info.get("webpage_url") or info.get("original_url"),
         "heights": heights,
         "codecs": vcodecs,
-        "has_video": any(f.kind != "audio" for f in fs),
+        "has_video": bool(vid_fs),
         "has_audio": any(f.kind != "video" for f in fs),
+        "is_gif": gif,
+        "width": max_w,
+        "height": max_h,
+        "fps": round(max_fps) if max_fps else None,
         "live": bool(info.get("is_live")),
     }
 

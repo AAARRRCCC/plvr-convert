@@ -15,6 +15,10 @@ disk and nothing is kept.
   a quote has a video, png otherwise. Quote depth 0-3.
 - **filename styles** like cobalt's: pretty, basic, classic, nerdy.
 - multi-item posts (carousels, threads) show a picker.
+- **photos**: every photo of an x.com post at its original size (from fxtwitter,
+  since yt-dlp reads only videos). Pick the ones you want, or none for all of
+  them: one comes as itself, more in one zip. A post of only photos opens this
+  way in any mode, and the photos mode reads the photos of a post that has a video too.
 - **remux**: your own file (pick, drop or paste it) to mp4, mkv, webm, gif,
   mp3, m4a, opus or wav. It runs in the browser on ffmpeg.wasm, so the file
   never reaches the server; streams are copied when the container takes them.

@@ -11,7 +11,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
-from .resolve import Fmt, ResolveError, formats
+from .resolve import Fmt, ResolveError, formats, is_gif
 
 # --------------------------------------------------------------- options ---
 
@@ -24,10 +24,10 @@ ABITRATES = ("320", "256", "192", "128", "96", "64")
 NAMES = ("random", "custom", "pretty", "basic", "classic", "nerdy")
 
 DEFAULTS = {
-    "mode": "auto", "quality": "1080", "vcodec": "h264", "container": "auto",
-    "aformat": "best", "abitrate": "192", "name": "random", "custom_name": "", "random_name": "",
+    "mode": "auto", "quality": "max", "vcodec": "h264", "container": "auto",
+    "aformat": "best", "abitrate": "320", "name": "random", "custom_name": "", "random_name": "",
     "metadata": True, "cover": True, "direct": False,
-    "start": None, "end": None, "gif_fps": 12, "gif_width": 480,
+    "start": None, "end": None, "gif_fps": 30, "gif_width": 800,
     "shot_depth": 1, "shot_stats": True,
 }
 
@@ -65,11 +65,22 @@ def normalize(raw: dict | None) -> dict:
             o[k] = None
     if o["start"] is not None and o["end"] is not None and o["end"] <= o["start"]:
         o["end"] = None
-    try:
-        o["gif_fps"] = min(30, max(5, int(raw.get("gif_fps", 12))))
-        o["gif_width"] = min(960, max(160, int(raw.get("gif_width", 480))))
-    except (TypeError, ValueError):
-        o["gif_fps"], o["gif_width"] = 12, 480
+    gf = raw.get("gif_fps", DEFAULTS["gif_fps"])
+    if str(gf) == "native":
+        o["gif_fps"] = "native"
+    else:
+        try:
+            o["gif_fps"] = min(30, max(5, int(gf)))
+        except (TypeError, ValueError):
+            o["gif_fps"] = DEFAULTS["gif_fps"]
+    gw = raw.get("gif_width", DEFAULTS["gif_width"])
+    if str(gw) == "native":
+        o["gif_width"] = "native"
+    else:
+        try:
+            o["gif_width"] = min(960, max(160, int(gw)))
+        except (TypeError, ValueError):
+            o["gif_width"] = DEFAULTS["gif_width"]
     return o
 
 
@@ -205,6 +216,8 @@ def make(info: dict, o: dict) -> Plan:
         return _audio(info, fs, o, meta, dur, clip)
     if mode == "gif":
         return _gif(info, fs, o, dur)
+    if mode == "auto" and is_gif(info, fs):
+        return _gif(info, fs, o, dur, force_native=True)
     v = _best_video(fs, o)
     assert v is not None
     if mode == "mute":
@@ -227,7 +240,7 @@ def _video(info, fs, o, v: Fmt, meta, dur, clip) -> Plan:
     size = v.size + (a.size if a and a is not v else 0)
 
     # the pass-through case: one plain file that is already what was asked for
-    if v.kind == "progressive" and v.direct and not clip and (o["container"] == "auto" or o["container"] == v.ext or (o["container"] == "mp4" and v.ext in ("mp4", "m4v"))):
+    if (v.kind == "progressive" or a is None) and v.direct and not clip and (o["container"] == "auto" or o["container"] == v.ext or (o["container"] == "mp4" and v.ext in ("mp4", "m4v"))):
         ext = v.ext if v.ext in MIME else "mp4"
         return Plan("proxy", ext, filename(info, o, ext, qual, v.vcodec), f"{qual} · {v.vcodec} · direct", size, src=v)
 
@@ -318,16 +331,35 @@ def _audio(info, fs, o, meta, dur, clip) -> Plan:
     return plan
 
 
-def _gif(info, fs, o, dur) -> Plan:
-    small = dict(o, quality="480" if o["quality"] == "max" or int(o["quality"]) > 480 else o["quality"])
-    v = _best_video(fs, small)
+def _gif(info, fs, o, dur, *, force_native: bool = False) -> Plan:
+    w = "native" if force_native else o["gif_width"]
+    fps = "native" if force_native else o["gif_fps"]
+    if w == "native":
+        v = _best_video(fs, dict(o, quality="max"))
+    else:
+        cap = "480" if w <= 480 else ("720" if w <= 720 else "1080")
+        q = o["quality"]
+        target_q = cap if q == "max" or int(q) > int(cap) else q
+        v = _best_video(fs, dict(o, quality=target_q))
     assert v is not None
+    clip = o["start"] is not None or o["end"] is not None
+    if v.ext == "gif" and v.direct and w == "native" and fps == "native" and not clip:
+        return Plan("proxy", "gif", filename(info, o, "gif", "native", None, "gif"), "gif · native · direct", v.size, src=v)
     if not dur and (info.get("duration") or 0) > 60:
         dur = ["-t", "30"]  # a gif of a whole video is nobody's wish; take the first half minute
-    w, fps = o["gif_width"], o["gif_fps"]
-    vf = f"fps={fps},scale='min({w},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
-    args = ["-map", "0:v:0", "-an", "-vf", vf] + dur + ["-f", "gif", "pipe:1"]
-    return Plan("ffmpeg", "gif", filename(info, o, "gif", f"{w}w", None, "gif"), f"gif · {w}px · {fps}fps", 0, inputs=[v], args=args)
+    filters: list[str] = []
+    if fps != "native":
+        filters.append(f"fps={fps}")
+    if w != "native":
+        filters.append(f"scale='min({w},iw)':-2:flags=lanczos")
+    prefix = (",".join(filters) + ",") if filters else ""
+    vf = f"{prefix}split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
+    args = ["-map", "0:v:0", "-an", "-vf", vf] + dur + ["-loop", "0", "-f", "gif", "pipe:1"]
+    w_tag = "native" if w == "native" else f"{w}w"
+    w_lbl = "native" if w == "native" else f"{w}px"
+    fps_lbl = "native fps" if fps == "native" else f"{fps}fps"
+    label = "gif · native" if (w == "native" and fps == "native") else f"gif · {w_lbl} · {fps_lbl}"
+    return Plan("ffmpeg", "gif", filename(info, o, "gif", w_tag, None, "gif"), label, 0, inputs=[v], args=args)
 
 
 def _out(ext: str) -> list[str]:
